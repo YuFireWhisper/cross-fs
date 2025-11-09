@@ -15,6 +15,7 @@ pub struct OpenOptions {
 
     // special
     direct_io: bool,
+    direct_io_buffer_size: usize,
 }
 
 impl OpenOptions {
@@ -52,8 +53,9 @@ impl OpenOptions {
         self
     }
 
-    pub fn direct_io(&mut self, direct_io: bool) -> &mut Self {
+    pub fn direct_io(&mut self, direct_io: bool, buffer_size: usize) -> &mut Self {
         self.direct_io = direct_io;
+        self.direct_io_buffer_size = buffer_size;
         self
     }
 
@@ -79,6 +81,7 @@ impl OpenOptions {
         Ok(File {
             inner: base,
             direct_io: self.direct_io,
+            direct_io_buffer_size: self.direct_io_buffer_size,
         })
     }
 }
