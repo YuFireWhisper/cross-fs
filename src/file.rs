@@ -4,8 +4,7 @@ use crate::open_options::OpenOptions;
 
 pub struct File {
     pub(crate) inner: std::fs::File,
-    pub(crate) direct_io: bool,
-    pub(crate) direct_io_buffer_size: usize,
+    pub(crate) direct_io_buffer: Vec<u8>,
 }
 
 impl File {
@@ -64,8 +63,7 @@ impl File {
     pub fn try_clone(&self) -> io::Result<Self> {
         Ok(Self {
             inner: self.inner.try_clone()?,
-            direct_io: self.direct_io,
-            direct_io_buffer_size: self.direct_io_buffer_size,
+            direct_io_buffer: vec![0; self.direct_io_buffer.len()],
         })
     }
 
