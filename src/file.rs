@@ -1,10 +1,12 @@
 use std::{fmt, fs::FileTimes, io, path::Path, time::SystemTime};
 
+use parking_lot::RwLock;
+
 use crate::open_options::OpenOptions;
 
 pub struct File {
     pub(crate) inner: std::fs::File,
-    pub(crate) direct_io_buffer: Vec<u8>,
+    pub(crate) direct_io_buffer: RwLock<Vec<u8>>,
 }
 
 impl File {
@@ -63,7 +65,7 @@ impl File {
     pub fn try_clone(&self) -> io::Result<Self> {
         Ok(Self {
             inner: self.inner.try_clone()?,
-            direct_io_buffer: vec![0; self.direct_io_buffer.len()],
+            direct_io_buffer: RwLock::new(vec![0; self.direct_io_buffer.read().len()]),
         })
     }
 

@@ -1,5 +1,7 @@
 use std::{io, path::Path};
 
+use parking_lot::lock_api::RwLock;
+
 use crate::file::File;
 
 #[derive(Clone)]
@@ -89,7 +91,7 @@ impl OpenOptions {
 
         Ok(File {
             inner: base,
-            direct_io_buffer: direct_io_buffer.unwrap_or_default(),
+            direct_io_buffer: RwLock::new(direct_io_buffer.unwrap_or_default()),
         })
     }
 }
