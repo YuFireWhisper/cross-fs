@@ -2,7 +2,10 @@ use std::{
     fmt,
     fs::FileTimes,
     io::{self, Read, Seek, Write},
-    os::fd::{AsFd, AsRawFd, IntoRawFd, OwnedFd},
+    os::{
+        fd::{AsFd, AsRawFd, IntoRawFd, OwnedFd},
+        unix::fs::FileExt as UnixFileExt,
+    },
     path::Path,
     process::Stdio,
     time::SystemTime,
@@ -210,5 +213,69 @@ impl From<File> for Stdio {
 impl IntoRawFd for File {
     fn into_raw_fd(self) -> std::os::fd::RawFd {
         self.inner.into_raw_fd()
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl UnixFileExt for File {
+    fn read_at(&self, buf: &mut [u8], offset: u64) -> io::Result<usize> {
+        let dbuf = self.direct_io_buffer.read();
+
+        if dbuf.is_empty() {
+            return self.inner.read_at(buf, offset);
+        }
+
+        if buf.len() > dbuf.len() {
+            let mut direct_io_buffer = alloc_aligend_buffer(buf.len());
+            let n = self
+                .inner
+                .read_at(&mut direct_io_buffer[..buf.len()], offset)?;
+            buf[..n].copy_from_slice(&direct_io_buffer[..n]);
+            return Ok(n);
+        }
+
+        let mut dbuf = self.direct_io_buffer.write();
+        let n = self.inner.read_at(&mut dbuf[..buf.len()], offset)?;
+        buf[..n].copy_from_slice(&dbuf[..n]);
+
+        Ok(n)
+    }
+
+    fn write_at(&self, buf: &[u8], offset: u64) -> io::Result<usize> {
+        let dbuf = self.direct_io_buffer.read();
+
+        if dbuf.is_empty() {
+            return self.inner.write_at(buf, offset);
+        }
+
+        if buf.len() > dbuf.len() {
+            let mut direct_io_buffer = alloc_aligend_buffer(buf.len());
+            direct_io_buffer[..buf.len()].copy_from_slice(buf);
+            return self.inner.write_at(&direct_io_buffer[..buf.len()], offset);
+        }
+
+        let mut dbuf = self.direct_io_buffer.write();
+        dbuf[..buf.len()].copy_from_slice(buf);
+        self.inner.write_at(&dbuf[..buf.len()], offset)
+    }
+
+    fn write_all_at(&self, buf: &[u8], offset: u64) -> io::Result<()> {
+        let dbuf = self.direct_io_buffer.read();
+
+        if dbuf.is_empty() {
+            return self.inner.write_all_at(buf, offset);
+        }
+
+        if buf.len() > dbuf.len() {
+            let mut direct_io_buffer = alloc_aligend_buffer(buf.len());
+            direct_io_buffer[..buf.len()].copy_from_slice(buf);
+            return self
+                .inner
+                .write_all_at(&direct_io_buffer[..buf.len()], offset);
+        }
+
+        let mut dbuf = self.direct_io_buffer.write();
+        dbuf[..buf.len()].copy_from_slice(buf);
+        self.inner.write_all_at(&dbuf[..buf.len()], offset)
     }
 }
