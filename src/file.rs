@@ -88,6 +88,10 @@ impl File {
     pub fn set_modified(&self, modified: SystemTime) -> io::Result<()> {
         self.inner.set_modified(modified)
     }
+
+    pub fn as_std(&self) -> &std::fs::File {
+        &self.inner
+    }
 }
 
 impl fmt::Debug for File {
