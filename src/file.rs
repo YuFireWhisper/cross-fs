@@ -1,7 +1,7 @@
 use std::{
     fmt,
     fs::FileTimes,
-    io::{self, Read},
+    io::{self, Read, Write},
     path::Path,
     time::SystemTime,
 };
@@ -121,5 +121,40 @@ impl Read for &File {
 impl Read for File {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         (&*self).read(buf)
+    }
+}
+
+impl Write for &File {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let dbuf = self.direct_io_buffer.read();
+
+        if dbuf.is_empty() {
+            return (&self.inner).write(buf);
+        }
+
+        if buf.len() > dbuf.len() {
+            let mut direct_io_buffer = alloc_aligend_buffer(buf.len());
+            direct_io_buffer[..buf.len()].copy_from_slice(buf);
+            return (&self.inner).write(&direct_io_buffer[..buf.len()]);
+        }
+
+        let mut dbuf = self.direct_io_buffer.write();
+
+        dbuf[..buf.len()].copy_from_slice(buf);
+        (&self.inner).write(&dbuf[..buf.len()])
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        (&self.inner).flush()
+    }
+}
+
+impl Write for File {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        (&*self).write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        (&*self).flush()
     }
 }
