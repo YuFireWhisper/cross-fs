@@ -1,4 +1,4 @@
-use std::{fs::FileTimes, io, path::Path, time::SystemTime};
+use std::{fmt, fs::FileTimes, io, path::Path, time::SystemTime};
 
 use crate::open_options::OpenOptions;
 
@@ -77,5 +77,11 @@ impl File {
 
     pub fn set_modified(&self, modified: SystemTime) -> io::Result<()> {
         self.inner.set_modified(modified)
+    }
+}
+
+impl fmt::Debug for File {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.inner.fmt(f)
     }
 }
