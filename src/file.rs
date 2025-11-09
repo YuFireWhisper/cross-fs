@@ -5,6 +5,7 @@ use std::{
     os::{
         fd::{AsFd, AsRawFd, IntoRawFd, OwnedFd},
         unix::fs::FileExt as UnixFileExt,
+        windows::fs::FileExt as WindowsFileExt,
     },
     path::Path,
     process::Stdio,
@@ -277,5 +278,51 @@ impl UnixFileExt for File {
         let mut dbuf = self.direct_io_buffer.write();
         dbuf[..buf.len()].copy_from_slice(buf);
         self.inner.write_all_at(&dbuf[..buf.len()], offset)
+    }
+}
+
+#[cfg(windows)]
+impl WindowsFileExt for File {
+    fn seek_read(&self, buf: &mut [u8], offset: u64) -> io::Result<usize> {
+        let dbuf = self.direct_io_buffer.read();
+
+        if dbuf.is_empty() {
+            return self.inner.seek_read(buf, offset);
+        }
+
+        if buf.len() > dbuf.len() {
+            let mut direct_io_buffer = alloc_aligend_buffer(buf.len());
+            let n = self
+                .inner
+                .seek_read(&mut direct_io_buffer[..buf.len()], offset)?;
+            buf[..n].copy_from_slice(&direct_io_buffer[..n]);
+            return Ok(n);
+        }
+
+        let mut dbuf = self.direct_io_buffer.write();
+        let n = self.inner.seek_read(&mut dbuf[..buf.len()], offset)?;
+        buf[..n].copy_from_slice(&dbuf[..n]);
+
+        Ok(n)
+    }
+
+    fn seek_write(&self, buf: &[u8], offset: u64) -> io::Result<usize> {
+        let dbuf = self.direct_io_buffer.read();
+
+        if dbuf.is_empty() {
+            return self.inner.seek_write(buf, offset);
+        }
+
+        if buf.len() > dbuf.len() {
+            let mut direct_io_buffer = alloc_aligend_buffer(buf.len());
+            direct_io_buffer[..buf.len()].copy_from_slice(buf);
+            return self
+                .inner
+                .seek_write(&direct_io_buffer[..buf.len()], offset);
+        }
+
+        let mut dbuf = self.direct_io_buffer.write();
+        dbuf[..buf.len()].copy_from_slice(buf);
+        self.inner.seek_write(&dbuf[..buf.len()], offset)
     }
 }
