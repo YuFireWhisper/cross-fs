@@ -1,8 +1,14 @@
-use std::{fmt, fs::FileTimes, io, path::Path, time::SystemTime};
+use std::{
+    fmt,
+    fs::FileTimes,
+    io::{self, Read},
+    path::Path,
+    time::SystemTime,
+};
 
 use parking_lot::RwLock;
 
-use crate::open_options::OpenOptions;
+use crate::{alloc_aligend_buffer, open_options::OpenOptions};
 
 pub struct File {
     pub(crate) inner: std::fs::File,
@@ -85,5 +91,29 @@ impl File {
 impl fmt::Debug for File {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.inner.fmt(f)
+    }
+}
+
+impl Read for &File {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let dbuf = self.direct_io_buffer.read();
+
+        if dbuf.is_empty() {
+            return (&self.inner).read(buf);
+        }
+
+        if buf.len() > dbuf.len() {
+            let mut direct_io_buffer = alloc_aligend_buffer(buf.len());
+            let n = (&self.inner).read(&mut direct_io_buffer[..buf.len()])?;
+            buf[..n].copy_from_slice(&direct_io_buffer[..n]);
+            return Ok(n);
+        }
+
+        let mut dbuf = self.direct_io_buffer.write();
+
+        let n = (&self.inner).read(&mut dbuf[..buf.len()])?;
+        buf[..n].copy_from_slice(&dbuf[..n]);
+
+        Ok(n)
     }
 }
