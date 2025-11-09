@@ -1,8 +1,6 @@
-use std::{io, path::Path, sync::OnceLock};
+use std::{io, path::Path};
 
 use crate::file::File;
-
-static SECTOR_SIZE: OnceLock<usize> = OnceLock::new();
 
 #[derive(Clone)]
 #[derive(Debug)]
@@ -75,26 +73,12 @@ impl OpenOptions {
         if self.direct_io {
             #[cfg(target_os = "linux")]
             {
-                use std::{
-                    alloc::{Layout, alloc},
-                    os::unix::fs::OpenOptionsExt,
-                };
+                use std::os::unix::fs::OpenOptionsExt;
+
+                use crate::alloc_aligend_buffer;
 
                 opts.custom_flags(libc::O_DIRECT);
-
-                let layout = Layout::from_size_align(self.direct_io_buffer_size, get_sector_size())
-                    .expect("Invalid layout for direct I/O buffer");
-
-                unsafe {
-                    let ptr = alloc(layout);
-                    assert!(!ptr.is_null(), "Failed to allocate direct I/O buffer");
-
-                    direct_io_buffer = Some(Vec::from_raw_parts(
-                        ptr,
-                        self.direct_io_buffer_size,
-                        self.direct_io_buffer_size,
-                    ));
-                }
+                direct_io_buffer = Some(alloc_aligend_buffer(self.direct_io_buffer_size));
             }
         }
 
@@ -105,27 +89,4 @@ impl OpenOptions {
             direct_io_buffer: direct_io_buffer.unwrap_or_default(),
         })
     }
-}
-
-fn get_sector_size() -> usize {
-    *SECTOR_SIZE.get_or_init(|| {
-        #[cfg(target_os = "linux")]
-        {
-            use std::os::unix::io::AsRawFd;
-
-            let file = std::fs::File::open("/dev/null").expect("Failed to open /dev/null");
-            let fd = file.as_raw_fd();
-            let mut sector_size: u32 = 0;
-
-            unsafe {
-                assert_ne!(
-                    libc::ioctl(fd, libc::BLKSSZGET, &mut sector_size),
-                    -1,
-                    "Failed to get sector size"
-                );
-            }
-
-            sector_size as usize
-        }
-    })
 }
