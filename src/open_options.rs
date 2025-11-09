@@ -14,7 +14,7 @@ pub struct OpenOptions {
     create_new: bool,
 
     // special
-    direct_io_buffer_size: usize,
+    direct_io_buffer_size: usize, // 0 means disabled
 }
 
 impl OpenOptions {
@@ -52,6 +52,11 @@ impl OpenOptions {
         self
     }
 
+    /// Set the buffer size for direct I/O operations.
+    ///
+    /// # Arguments
+    ///
+    /// * `buffer_size` - The size of the buffer to be used for direct I/O. A value of 0 disables direct I/O.
     pub fn direct_io(&mut self, buffer_size: usize) -> &mut Self {
         self.direct_io_buffer_size = buffer_size;
         self
