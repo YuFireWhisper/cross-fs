@@ -2,7 +2,7 @@ use std::{
     fmt,
     fs::FileTimes,
     io::{self, Read, Seek, Write},
-    os::fd::{AsFd, AsRawFd},
+    os::fd::{AsFd, AsRawFd, OwnedFd},
     path::Path,
     time::SystemTime,
 };
@@ -187,5 +187,11 @@ impl AsRawFd for File {
 impl From<File> for std::fs::File {
     fn from(file: File) -> Self {
         file.inner
+    }
+}
+
+impl From<File> for OwnedFd {
+    fn from(file: File) -> Self {
+        file.inner.into()
     }
 }
