@@ -117,3 +117,9 @@ impl Read for &File {
         Ok(n)
     }
 }
+
+impl Read for File {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        (&*self).read(buf)
+    }
+}
