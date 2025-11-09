@@ -2,6 +2,7 @@ use std::{
     fmt,
     fs::FileTimes,
     io::{self, Read, Seek, Write},
+    os::fd::{AsFd, AsRawFd},
     path::Path,
     time::SystemTime,
 };
@@ -168,5 +169,17 @@ impl Seek for &File {
 impl Seek for File {
     fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {
         (&*self).seek(pos)
+    }
+}
+
+impl AsFd for File {
+    fn as_fd(&self) -> std::os::fd::BorrowedFd<'_> {
+        self.inner.as_fd()
+    }
+}
+
+impl AsRawFd for File {
+    fn as_raw_fd(&self) -> std::os::fd::RawFd {
+        self.inner.as_raw_fd()
     }
 }
