@@ -2,7 +2,7 @@ use std::{
     fmt,
     fs::FileTimes,
     io::{self, Read, Seek, Write},
-    os::fd::{AsFd, AsRawFd, OwnedFd},
+    os::fd::{AsFd, AsRawFd, IntoRawFd, OwnedFd},
     path::Path,
     process::Stdio,
     time::SystemTime,
@@ -200,5 +200,11 @@ impl From<File> for OwnedFd {
 impl From<File> for Stdio {
     fn from(file: File) -> Self {
         file.inner.into()
+    }
+}
+
+impl IntoRawFd for File {
+    fn into_raw_fd(self) -> std::os::fd::RawFd {
+        self.inner.into_raw_fd()
     }
 }
