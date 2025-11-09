@@ -2,11 +2,6 @@ use std::{
     fmt,
     fs::FileTimes,
     io::{self, Read, Seek, Write},
-    os::{
-        fd::{AsFd, AsRawFd, IntoRawFd, OwnedFd},
-        unix::fs::FileExt as UnixFileExt,
-        windows::fs::FileExt as WindowsFileExt,
-    },
     path::Path,
     process::Stdio,
     time::SystemTime,
@@ -181,27 +176,9 @@ impl Seek for File {
     }
 }
 
-impl AsFd for File {
-    fn as_fd(&self) -> std::os::fd::BorrowedFd<'_> {
-        self.inner.as_fd()
-    }
-}
-
-impl AsRawFd for File {
-    fn as_raw_fd(&self) -> std::os::fd::RawFd {
-        self.inner.as_raw_fd()
-    }
-}
-
 impl From<File> for std::fs::File {
     fn from(file: File) -> Self {
         file.inner
-    }
-}
-
-impl From<File> for OwnedFd {
-    fn from(file: File) -> Self {
-        file.inner.into()
     }
 }
 
@@ -211,118 +188,188 @@ impl From<File> for Stdio {
     }
 }
 
-impl IntoRawFd for File {
-    fn into_raw_fd(self) -> std::os::fd::RawFd {
-        self.inner.into_raw_fd()
-    }
-}
+#[cfg(unix)]
+pub mod impl_unix {
+    use std::{
+        io,
+        os::{
+            fd::{AsFd, AsRawFd, BorrowedFd, IntoRawFd, OwnedFd, RawFd},
+            unix::fs::FileExt,
+        },
+    };
 
-#[cfg(target_os = "linux")]
-impl UnixFileExt for File {
-    fn read_at(&self, buf: &mut [u8], offset: u64) -> io::Result<usize> {
-        let dbuf = self.direct_io_buffer.read();
+    use crate::alloc_aligend_buffer;
 
-        if dbuf.is_empty() {
-            return self.inner.read_at(buf, offset);
+    use super::File;
+
+    impl AsFd for File {
+        fn as_fd(&self) -> BorrowedFd<'_> {
+            self.inner.as_fd()
         }
-
-        if buf.len() > dbuf.len() {
-            let mut direct_io_buffer = alloc_aligend_buffer(buf.len());
-            let n = self
-                .inner
-                .read_at(&mut direct_io_buffer[..buf.len()], offset)?;
-            buf[..n].copy_from_slice(&direct_io_buffer[..n]);
-            return Ok(n);
-        }
-
-        let mut dbuf = self.direct_io_buffer.write();
-        let n = self.inner.read_at(&mut dbuf[..buf.len()], offset)?;
-        buf[..n].copy_from_slice(&dbuf[..n]);
-
-        Ok(n)
     }
 
-    fn write_at(&self, buf: &[u8], offset: u64) -> io::Result<usize> {
-        let dbuf = self.direct_io_buffer.read();
-
-        if dbuf.is_empty() {
-            return self.inner.write_at(buf, offset);
+    impl AsRawFd for File {
+        fn as_raw_fd(&self) -> RawFd {
+            self.inner.as_raw_fd()
         }
-
-        if buf.len() > dbuf.len() {
-            let mut direct_io_buffer = alloc_aligend_buffer(buf.len());
-            direct_io_buffer[..buf.len()].copy_from_slice(buf);
-            return self.inner.write_at(&direct_io_buffer[..buf.len()], offset);
-        }
-
-        let mut dbuf = self.direct_io_buffer.write();
-        dbuf[..buf.len()].copy_from_slice(buf);
-        self.inner.write_at(&dbuf[..buf.len()], offset)
     }
 
-    fn write_all_at(&self, buf: &[u8], offset: u64) -> io::Result<()> {
-        let dbuf = self.direct_io_buffer.read();
+    impl IntoRawFd for File {
+        fn into_raw_fd(self) -> RawFd {
+            self.inner.into_raw_fd()
+        }
+    }
 
-        if dbuf.is_empty() {
-            return self.inner.write_all_at(buf, offset);
+    impl From<File> for OwnedFd {
+        fn from(file: File) -> Self {
+            file.inner.into()
+        }
+    }
+
+    impl FileExt for File {
+        fn read_at(&self, buf: &mut [u8], offset: u64) -> io::Result<usize> {
+            let dbuf = self.direct_io_buffer.read();
+
+            if dbuf.is_empty() {
+                return self.inner.read_at(buf, offset);
+            }
+
+            if buf.len() > dbuf.len() {
+                let mut direct_io_buffer = alloc_aligend_buffer(buf.len());
+                let n = self
+                    .inner
+                    .read_at(&mut direct_io_buffer[..buf.len()], offset)?;
+                buf[..n].copy_from_slice(&direct_io_buffer[..n]);
+                return Ok(n);
+            }
+
+            let mut dbuf = self.direct_io_buffer.write();
+            let n = self.inner.read_at(&mut dbuf[..buf.len()], offset)?;
+            buf[..n].copy_from_slice(&dbuf[..n]);
+
+            Ok(n)
         }
 
-        if buf.len() > dbuf.len() {
-            let mut direct_io_buffer = alloc_aligend_buffer(buf.len());
-            direct_io_buffer[..buf.len()].copy_from_slice(buf);
-            return self
-                .inner
-                .write_all_at(&direct_io_buffer[..buf.len()], offset);
+        fn write_at(&self, buf: &[u8], offset: u64) -> io::Result<usize> {
+            let dbuf = self.direct_io_buffer.read();
+
+            if dbuf.is_empty() {
+                return self.inner.write_at(buf, offset);
+            }
+
+            if buf.len() > dbuf.len() {
+                let mut direct_io_buffer = alloc_aligend_buffer(buf.len());
+                direct_io_buffer[..buf.len()].copy_from_slice(buf);
+                return self.inner.write_at(&direct_io_buffer[..buf.len()], offset);
+            }
+
+            let mut dbuf = self.direct_io_buffer.write();
+            dbuf[..buf.len()].copy_from_slice(buf);
+            self.inner.write_at(&dbuf[..buf.len()], offset)
         }
 
-        let mut dbuf = self.direct_io_buffer.write();
-        dbuf[..buf.len()].copy_from_slice(buf);
-        self.inner.write_all_at(&dbuf[..buf.len()], offset)
+        fn write_all_at(&self, buf: &[u8], offset: u64) -> io::Result<()> {
+            let dbuf = self.direct_io_buffer.read();
+
+            if dbuf.is_empty() {
+                return self.inner.write_all_at(buf, offset);
+            }
+
+            if buf.len() > dbuf.len() {
+                let mut direct_io_buffer = alloc_aligend_buffer(buf.len());
+                direct_io_buffer[..buf.len()].copy_from_slice(buf);
+                return self
+                    .inner
+                    .write_all_at(&direct_io_buffer[..buf.len()], offset);
+            }
+
+            let mut dbuf = self.direct_io_buffer.write();
+            dbuf[..buf.len()].copy_from_slice(buf);
+            self.inner.write_all_at(&dbuf[..buf.len()], offset)
+        }
     }
 }
 
 #[cfg(windows)]
-impl WindowsFileExt for File {
-    fn seek_read(&self, buf: &mut [u8], offset: u64) -> io::Result<usize> {
-        let dbuf = self.direct_io_buffer.read();
+pub mod impl_windows {
+    use std::{
+        io,
+        os::windows::{
+            fs::FileExt,
+            io::{AsHandle, AsRawHandle, IntoRawHandle, OwnedHandle},
+        },
+    };
 
-        if dbuf.is_empty() {
-            return self.inner.seek_read(buf, offset);
+    use crate::alloc_aligend_buffer;
+
+    use super::File;
+
+    impl AsHandle for File {
+        fn as_handle(&self) -> std::os::windows::io::BorrowedHandle<'_> {
+            self.inner.as_handle()
         }
-
-        if buf.len() > dbuf.len() {
-            let mut direct_io_buffer = alloc_aligend_buffer(buf.len());
-            let n = self
-                .inner
-                .seek_read(&mut direct_io_buffer[..buf.len()], offset)?;
-            buf[..n].copy_from_slice(&direct_io_buffer[..n]);
-            return Ok(n);
-        }
-
-        let mut dbuf = self.direct_io_buffer.write();
-        let n = self.inner.seek_read(&mut dbuf[..buf.len()], offset)?;
-        buf[..n].copy_from_slice(&dbuf[..n]);
-
-        Ok(n)
     }
 
-    fn seek_write(&self, buf: &[u8], offset: u64) -> io::Result<usize> {
-        let dbuf = self.direct_io_buffer.read();
+    impl AsRawHandle for File {
+        fn as_raw_handle(&self) -> std::os::windows::io::RawHandle {
+            self.inner.as_raw_handle()
+        }
+    }
 
-        if dbuf.is_empty() {
-            return self.inner.seek_write(buf, offset);
+    impl IntoRawHandle for File {
+        fn into_raw_handle(self) -> std::os::windows::io::RawHandle {
+            self.inner.into_raw_handle()
+        }
+    }
+
+    impl From<File> for OwnedHandle {
+        fn from(file: File) -> Self {
+            file.inner.into()
+        }
+    }
+
+    impl FileExt for File {
+        fn seek_read(&self, buf: &mut [u8], offset: u64) -> io::Result<usize> {
+            let dbuf = self.direct_io_buffer.read();
+
+            if dbuf.is_empty() {
+                return self.inner.seek_read(buf, offset);
+            }
+
+            if buf.len() > dbuf.len() {
+                let mut direct_io_buffer = alloc_aligend_buffer(buf.len());
+                let n = self
+                    .inner
+                    .seek_read(&mut direct_io_buffer[..buf.len()], offset)?;
+                buf[..n].copy_from_slice(&direct_io_buffer[..n]);
+                return Ok(n);
+            }
+
+            let mut dbuf = self.direct_io_buffer.write();
+            let n = self.inner.seek_read(&mut dbuf[..buf.len()], offset)?;
+            buf[..n].copy_from_slice(&dbuf[..n]);
+
+            Ok(n)
         }
 
-        if buf.len() > dbuf.len() {
-            let mut direct_io_buffer = alloc_aligend_buffer(buf.len());
-            direct_io_buffer[..buf.len()].copy_from_slice(buf);
-            return self
-                .inner
-                .seek_write(&direct_io_buffer[..buf.len()], offset);
-        }
+        fn seek_write(&self, buf: &[u8], offset: u64) -> io::Result<usize> {
+            let dbuf = self.direct_io_buffer.read();
 
-        let mut dbuf = self.direct_io_buffer.write();
-        dbuf[..buf.len()].copy_from_slice(buf);
-        self.inner.seek_write(&dbuf[..buf.len()], offset)
+            if dbuf.is_empty() {
+                return self.inner.seek_write(buf, offset);
+            }
+
+            if buf.len() > dbuf.len() {
+                let mut direct_io_buffer = alloc_aligend_buffer(buf.len());
+                direct_io_buffer[..buf.len()].copy_from_slice(buf);
+                return self
+                    .inner
+                    .seek_write(&direct_io_buffer[..buf.len()], offset);
+            }
+
+            let mut dbuf = self.direct_io_buffer.write();
+            dbuf[..buf.len()].copy_from_slice(buf);
+            self.inner.seek_write(&dbuf[..buf.len()], offset)
+        }
     }
 }
