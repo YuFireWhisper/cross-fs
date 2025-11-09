@@ -4,6 +4,7 @@ use std::{
     io::{self, Read, Seek, Write},
     os::fd::{AsFd, AsRawFd, OwnedFd},
     path::Path,
+    process::Stdio,
     time::SystemTime,
 };
 
@@ -191,6 +192,12 @@ impl From<File> for std::fs::File {
 }
 
 impl From<File> for OwnedFd {
+    fn from(file: File) -> Self {
+        file.inner.into()
+    }
+}
+
+impl From<File> for Stdio {
     fn from(file: File) -> Self {
         file.inner.into()
     }
