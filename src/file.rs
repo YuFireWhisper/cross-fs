@@ -183,3 +183,9 @@ impl AsRawFd for File {
         self.inner.as_raw_fd()
     }
 }
+
+impl From<File> for std::fs::File {
+    fn from(file: File) -> Self {
+        file.inner
+    }
+}
