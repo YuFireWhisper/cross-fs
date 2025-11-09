@@ -1,7 +1,7 @@
 use std::{
     fmt,
     fs::FileTimes,
-    io::{self, Read, Write},
+    io::{self, Read, Seek, Write},
     path::Path,
     time::SystemTime,
 };
@@ -156,5 +156,17 @@ impl Write for File {
 
     fn flush(&mut self) -> io::Result<()> {
         (&*self).flush()
+    }
+}
+
+impl Seek for &File {
+    fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {
+        (&self.inner).seek(pos)
+    }
+}
+
+impl Seek for File {
+    fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {
+        (&*self).seek(pos)
     }
 }
