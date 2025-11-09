@@ -14,7 +14,6 @@ pub struct OpenOptions {
     create_new: bool,
 
     // special
-    direct_io: bool,
     direct_io_buffer_size: usize,
 }
 
@@ -53,8 +52,7 @@ impl OpenOptions {
         self
     }
 
-    pub fn direct_io(&mut self, direct_io: bool, buffer_size: usize) -> &mut Self {
-        self.direct_io = direct_io;
+    pub fn direct_io(&mut self, buffer_size: usize) -> &mut Self {
         self.direct_io_buffer_size = buffer_size;
         self
     }
@@ -70,7 +68,7 @@ impl OpenOptions {
 
         let mut direct_io_buffer = None;
 
-        if self.direct_io {
+        if self.direct_io_buffer_size > 0 {
             #[cfg(target_os = "linux")]
             {
                 use std::os::unix::fs::OpenOptionsExt;
