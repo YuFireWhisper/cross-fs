@@ -84,7 +84,7 @@ fn get_sector_size() -> usize {
                     std::ptr::null_mut(),
                     OPEN_EXISTING,
                     FILE_ATTRIBUTE_NORMAL,
-                    0,
+                    std::ptr::null_mut(),
                 )
             };
 
@@ -95,7 +95,7 @@ fn get_sector_size() -> usize {
                 std::io::Error::last_os_error()
             );
 
-            let mut query = STORAGE_PROPERTY_QUERY {
+            let query = STORAGE_PROPERTY_QUERY {
                 PropertyId: StorageAccessAlignmentProperty,
                 QueryType: PropertyStandardQuery,
                 AdditionalParameters: [0],
