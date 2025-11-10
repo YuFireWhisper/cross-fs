@@ -3,6 +3,9 @@ name = "cross-fs"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+align-512 = []
+
 [dependencies]
 parking_lot = "0.12"
 
