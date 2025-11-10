@@ -1,4 +1,4 @@
-#![feature(can_vector)]
+#![feature(can_vector, unix_file_vectored_at)]
 
 mod file;
 mod file_ext;
@@ -128,6 +128,8 @@ mod tests {
     #[test]
     #[cfg(all(target_os = "linux", not(feature = "direct-io")))]
     fn read_vectored() {
+        use std::io::IoSliceMut;
+
         let dir = tempdir().unwrap();
         let file_path = dir.path().join(FILE_NAME);
 
@@ -170,6 +172,8 @@ mod tests {
     #[test]
     #[cfg(all(target_os = "linux", feature = "direct-io"))]
     fn direct_io_read_vectored() {
+        use std::io::IoSliceMut;
+
         let dir = tempdir().unwrap();
         let file_path = dir.path().join(FILE_NAME);
 

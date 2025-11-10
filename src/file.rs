@@ -548,7 +548,10 @@ pub mod impl_unix {
         },
     };
 
-    use crate::file::{File, read, write};
+    use crate::{
+        ALIGN, avec,
+        file::{File, read, write},
+    };
 
     impl AsFd for File {
         fn as_fd(&self) -> BorrowedFd<'_> {
@@ -581,10 +584,122 @@ pub mod impl_unix {
             })
         }
 
+        fn read_vectored_at(
+            &self,
+            bufs: &mut [io::IoSliceMut<'_>],
+            offset: u64,
+        ) -> io::Result<usize> {
+            use std::os::unix::prelude::AsRawFd;
+
+            let mut iovs = Vec::with_capacity(bufs.len());
+            let mut tmp_bufs = Vec::with_capacity(bufs.len());
+
+            for buf in bufs.iter_mut() {
+                let buf_addr = buf.as_mut_ptr() as usize;
+                let buf_len = buf.len();
+                let align_len = buf_len.next_multiple_of(ALIGN);
+
+                if buf_addr.is_multiple_of(ALIGN) && buf_len == align_len {
+                    iovs.push(libc::iovec {
+                        iov_base: buf.as_mut_ptr() as *mut _,
+                        iov_len: align_len,
+                    });
+                    tmp_bufs.push(None);
+                } else {
+                    let mut tmp_buf = avec!(align_len);
+                    iovs.push(libc::iovec {
+                        iov_base: tmp_buf.as_mut_ptr() as *mut _,
+                        iov_len: align_len,
+                    });
+                    tmp_bufs.push(Some(tmp_buf));
+                }
+            }
+
+            let n = unsafe {
+                libc::preadv(
+                    self.inner.as_raw_fd(),
+                    iovs.as_ptr(),
+                    iovs.len() as libc::c_int,
+                    offset as libc::off64_t,
+                )
+            };
+
+            if n < 0 {
+                return Err(io::Error::last_os_error());
+            }
+
+            if n == 0 {
+                return Ok(0);
+            }
+
+            let mut remaining = n as usize;
+            for (buf, tmp_buf) in bufs.iter_mut().zip(tmp_bufs) {
+                let len = buf.len();
+                let wrote = remaining.min(len);
+                if let Some(tmp_buf) = tmp_buf {
+                    buf.copy_from_slice(&tmp_buf[..wrote]);
+                }
+                remaining -= wrote;
+                if remaining == 0 {
+                    break;
+                }
+            }
+
+            Ok(n as usize)
+        }
+
         fn write_at(&self, buf: &[u8], offset: u64) -> io::Result<usize> {
             write(self, buf, offset, |file, buf, offset| {
                 file.write_at(buf, offset)
             })
+        }
+
+        fn write_vectored_at(&self, bufs: &[io::IoSlice<'_>], offset: u64) -> io::Result<usize> {
+            use std::os::unix::prelude::AsRawFd;
+
+            let mut iovs = Vec::with_capacity(bufs.len());
+            let mut tmp_bufs = Vec::with_capacity(bufs.len());
+
+            for buf in bufs.iter() {
+                let buf_addr = buf.as_ptr() as usize;
+                let buf_len = buf.len();
+
+                assert!(
+                    buf_len.is_multiple_of(ALIGN),
+                    "Buffer length must be a multiple of ALIGN"
+                );
+
+                if buf_addr.is_multiple_of(ALIGN) {
+                    iovs.push(libc::iovec {
+                        iov_base: buf.as_ptr() as *mut _,
+                        iov_len: buf_len,
+                    });
+                    tmp_bufs.push(None);
+                } else {
+                    let mut tmp_buf = avec!(buf_len);
+                    tmp_buf[..buf_len].copy_from_slice(buf);
+                    iovs.push(libc::iovec {
+                        iov_base: tmp_buf.as_mut_ptr() as *mut _,
+                        iov_len: buf_len,
+                    });
+                    tmp_bufs.push(Some(tmp_buf));
+                }
+            }
+
+            let n = unsafe {
+                libc::pwritev(
+                    self.inner.as_raw_fd(),
+                    iovs.as_ptr(),
+                    iovs.len() as libc::c_int,
+                    offset as libc::off64_t,
+                )
+            };
+
+            if n < 0 {
+                return Err(io::Error::last_os_error());
+            }
+
+            Ok(n as usize)
         }
 
         fn write_all_at(&self, buf: &[u8], offset: u64) -> io::Result<()> {
