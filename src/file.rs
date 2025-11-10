@@ -246,7 +246,84 @@ impl Read for &File {
         Ok(n as usize)
     }
 
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "windows", feature = "direct-io"))]
+    fn read_vectored(&mut self, bufs: &mut [io::IoSliceMut<'_>]) -> io::Result<usize> {
+        use std::os::windows::io::AsRawHandle;
+
+        use windows_sys::Win32::{
+            Storage::FileSystem::{FILE_SEGMENT_ELEMENT, ReadFileScatter},
+            System::IO::{GetOverlappedResult, OVERLAPPED},
+        };
+
+        let mut segments: Vec<FILE_SEGMENT_ELEMENT> = Vec::with_capacity(bufs.len() + 1);
+        let mut tmp_bufs = Vec::new();
+        let mut total_len = 0;
+
+        for buf in bufs.iter_mut() {
+            let buf_addr = buf.as_mut_ptr() as usize;
+            let buf_len = buf.len();
+            let align_len = buf_len.next_multiple_of(ALIGN);
+
+            if buf_addr.is_multiple_of(ALIGN) && buf_len == align_len {
+                segments.push(FILE_SEGMENT_ELEMENT {
+                    Buffer: buf.as_mut_ptr() as *mut _,
+                });
+                tmp_bufs.push(None);
+            } else {
+                let mut tmp_buf = avec!(align_len);
+                segments.push(FILE_SEGMENT_ELEMENT {
+                    Buffer: tmp_buf.as_mut_ptr() as *mut _,
+                });
+                tmp_bufs.push(Some(tmp_buf));
+            }
+
+            total_len += align_len;
+        }
+
+        segments.push(unsafe { std::mem::zeroed() });
+        let mut overlapped: OVERLAPPED = unsafe { std::mem::zeroed() };
+
+        let result = unsafe {
+            ReadFileScatter(
+                self.inner.as_raw_handle(),
+                segments.as_ptr(),
+                total_len as u32,
+                std::ptr::null_mut(),
+                &mut overlapped,
+            )
+        };
+
+        if result == 0 {
+            return Err(io::Error::last_os_error());
+        }
+
+        let mut bytes_read = 0u32;
+        unsafe { GetOverlappedResult(self.inner.as_raw_handle(), &overlapped, &mut bytes_read, 1) };
+
+        if bytes_read == 0 {
+            return Ok(0);
+        }
+
+        let mut remaining = bytes_read as usize;
+        for (buf, tmp_buf) in bufs.iter_mut().zip(tmp_bufs) {
+            let len = buf.len();
+            let wrote = remaining.min(len);
+
+            if let Some(tmp_buf) = tmp_buf {
+                buf.copy_from_slice(&tmp_buf[..wrote]);
+            }
+
+            remaining -= wrote;
+
+            if remaining == 0 {
+                break;
+            }
+        }
+
+        Ok(bytes_read as usize)
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
     fn is_read_vectored(&self) -> bool {
         true
     }
