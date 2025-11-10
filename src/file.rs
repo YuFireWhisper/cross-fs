@@ -282,20 +282,24 @@ impl Write for &File {
         for buf in bufs.iter() {
             let buf_addr = buf.as_ptr() as usize;
             let buf_len = buf.len();
-            let align_len = buf_len.next_multiple_of(ALIGN);
 
-            if buf_addr.is_multiple_of(ALIGN) && buf_len == align_len {
+            assert!(
+                buf_len.is_multiple_of(ALIGN),
+                "Buffer length must be a multiple of ALIGN"
+            );
+
+            if buf_addr.is_multiple_of(ALIGN) {
                 iovs.push(libc::iovec {
                     iov_base: buf.as_ptr() as *mut _,
                     iov_len: buf_len,
                 });
                 tmp_bufs.push(None);
             } else {
-                let mut tmp_buf = avec!(align_len);
+                let mut tmp_buf = avec!(buf_len);
                 tmp_buf[..buf_len].copy_from_slice(buf);
                 iovs.push(libc::iovec {
                     iov_base: tmp_buf.as_ptr() as *mut _,
-                    iov_len: align_len,
+                    iov_len: buf_len,
                 });
                 tmp_bufs.push(Some(tmp_buf));
             }
