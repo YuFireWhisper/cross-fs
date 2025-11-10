@@ -9,7 +9,7 @@ use std::{
 
 use parking_lot::RwLock;
 
-use crate::{open_options::OpenOptions, utils::ALIGN, utils::alloc_aligend_buffer};
+use crate::{ALIGN, avec, open_options::OpenOptions};
 
 pub struct File {
     pub(crate) inner: std::fs::File,
@@ -111,7 +111,7 @@ where
         }
 
         if buf.len() > file.direct_io_buffer_size {
-            let mut dbuf = alloc_aligend_buffer(buf.len());
+            let mut dbuf = avec!(buf.len());
             let n = f(&file.inner, &mut dbuf[..buf.len()], other)?;
             buf[..n].copy_from_slice(&dbuf[..n]);
             Ok(n)
@@ -140,7 +140,7 @@ where
         }
 
         if buf.len() > file.direct_io_buffer_size {
-            let mut dbuf = alloc_aligend_buffer(buf.len());
+            let mut dbuf = avec!(buf.len());
             dbuf[..buf.len()].copy_from_slice(buf);
             f(&file.inner, &dbuf[..buf.len()], other)
         } else {

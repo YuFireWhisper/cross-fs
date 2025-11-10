@@ -1,11 +1,28 @@
 mod file;
 mod file_ext;
 mod open_options;
-mod utils;
 
 pub use file::File;
 pub use file_ext::FileExt;
 pub use open_options::OpenOptions;
+
+#[cfg(feature = "align-512")]
+pub const ALIGN: usize = 512;
+
+#[cfg(not(feature = "align-512"))]
+pub const ALIGN: usize = 4096;
+
+#[macro_export]
+macro_rules! avec {
+    ($cap:expr) => {{
+        let layout = ::std::alloc::Layout::from_size_align($cap, $crate::ALIGN).unwrap();
+        let ptr = unsafe { std::alloc::alloc_zeroed(layout) };
+        if ptr.is_null() {
+            std::alloc::handle_alloc_error(layout);
+        }
+        unsafe { Vec::<u8>::from_raw_parts(ptr as *mut u8, $cap, $cap) }
+    }};
+}
 
 #[cfg(test)]
 mod tests {

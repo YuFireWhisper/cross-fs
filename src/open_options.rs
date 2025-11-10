@@ -2,7 +2,7 @@ use std::{io, path::Path};
 
 use parking_lot::lock_api::RwLock;
 
-use crate::file::File;
+use crate::{File, avec};
 
 #[derive(Clone)]
 #[derive(Debug)]
@@ -84,10 +84,8 @@ impl OpenOptions {
                 {
                     use std::os::unix::fs::OpenOptionsExt;
 
-                    use crate::utils::alloc_aligend_buffer;
-
                     opts.custom_flags(libc::O_DIRECT);
-                    direct_io_buffer = Some(alloc_aligend_buffer(self.direct_io_buffer_size));
+                    direct_io_buffer = Some(avec!(self.direct_io_buffer_size));
                 }
 
                 #[cfg(windows)]
@@ -98,7 +96,7 @@ impl OpenOptions {
                     use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_NO_BUFFERING;
 
                     opts.custom_flags(FILE_FLAG_NO_BUFFERING);
-                    direct_io_buffer = Some(alloc_aligend_buffer(self.direct_io_buffer_size));
+                    direct_io_buffer = Some(avec!(self.direct_io_buffer_size));
                 }
             }
 
