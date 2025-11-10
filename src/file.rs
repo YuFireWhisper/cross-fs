@@ -114,6 +114,7 @@ impl Read for &File {
             return Ok(n);
         }
 
+        drop(dbuf);
         let mut dbuf = self.direct_io_buffer.write();
 
         let n = (&self.inner).read(&mut dbuf[..buf.len()])?;
@@ -143,6 +144,7 @@ impl Write for &File {
             return (&self.inner).write(&direct_io_buffer[..buf.len()]);
         }
 
+        drop(dbuf);
         let mut dbuf = self.direct_io_buffer.write();
 
         dbuf[..buf.len()].copy_from_slice(buf);
