@@ -13,8 +13,11 @@ use crate::{open_options::OpenOptions, utils::alloc_aligend_buffer};
 
 pub struct File {
     pub(crate) inner: std::fs::File,
+
     #[cfg(feature = "direct-io")]
     pub(crate) direct_io_buffer: RwLock<Vec<u8>>,
+    #[cfg(feature = "direct-io")]
+    pub(crate) direct_io_buffer_size: usize,
 }
 
 impl File {
@@ -75,6 +78,8 @@ impl File {
             inner: self.inner.try_clone()?,
             #[cfg(feature = "direct-io")]
             direct_io_buffer: RwLock::new(vec![0; self.direct_io_buffer.read().len()]),
+            #[cfg(feature = "direct-io")]
+            direct_io_buffer_size: self.direct_io_buffer_size,
         })
     }
 
@@ -101,14 +106,13 @@ where
 {
     #[cfg(feature = "direct-io")]
     {
-        let mut dbuf = file.direct_io_buffer.write();
-
-        if buf.len() > dbuf.len() {
+        if buf.len() > file.direct_io_buffer_size {
             let mut dbuf = alloc_aligend_buffer(buf.len());
             let n = f(&file.inner, &mut dbuf[..buf.len()], other)?;
             buf[..n].copy_from_slice(&dbuf[..n]);
             Ok(n)
         } else {
+            let mut dbuf = file.direct_io_buffer.write();
             let n = f(&file.inner, &mut dbuf[..buf.len()], other)?;
             buf[..n].copy_from_slice(&dbuf[..n]);
             Ok(n)
@@ -127,13 +131,12 @@ where
 {
     #[cfg(feature = "direct-io")]
     {
-        let mut dbuf = file.direct_io_buffer.write();
-
-        if buf.len() > dbuf.len() {
+        if buf.len() > file.direct_io_buffer_size {
             let mut dbuf = alloc_aligend_buffer(buf.len());
             dbuf[..buf.len()].copy_from_slice(buf);
             f(&file.inner, &dbuf[..buf.len()], other)
         } else {
+            let mut dbuf = file.direct_io_buffer.write();
             dbuf[..buf.len()].copy_from_slice(buf);
             f(&file.inner, &dbuf[..buf.len()], other)
         }
