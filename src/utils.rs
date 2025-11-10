@@ -1,10 +1,10 @@
 use std::alloc::Layout;
 
 #[cfg(feature = "align-512")]
-const ALIGN: usize = 512;
+pub const ALIGN: usize = 512;
 
 #[cfg(not(feature = "align-512"))]
-const ALIGN: usize = 4096;
+pub const ALIGN: usize = 4096;
 
 pub fn alloc_aligend_buffer(size: usize) -> Vec<u8> {
     let layout =

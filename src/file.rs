@@ -9,7 +9,7 @@ use std::{
 
 use parking_lot::RwLock;
 
-use crate::{open_options::OpenOptions, utils::alloc_aligend_buffer};
+use crate::{open_options::OpenOptions, utils::ALIGN, utils::alloc_aligend_buffer};
 
 pub struct File {
     pub(crate) inner: std::fs::File,
@@ -106,6 +106,10 @@ where
 {
     #[cfg(feature = "direct-io")]
     {
+        if (buf.as_ptr() as usize).is_multiple_of(ALIGN) {
+            return f(&file.inner, buf, other);
+        }
+
         if buf.len() > file.direct_io_buffer_size {
             let mut dbuf = alloc_aligend_buffer(buf.len());
             let n = f(&file.inner, &mut dbuf[..buf.len()], other)?;
@@ -131,6 +135,10 @@ where
 {
     #[cfg(feature = "direct-io")]
     {
+        if (buf.as_ptr() as usize).is_multiple_of(ALIGN) {
+            return f(&file.inner, buf, other);
+        }
+
         if buf.len() > file.direct_io_buffer_size {
             let mut dbuf = alloc_aligend_buffer(buf.len());
             dbuf[..buf.len()].copy_from_slice(buf);
