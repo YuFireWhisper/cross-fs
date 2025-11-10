@@ -177,11 +177,88 @@ impl Read for &File {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         read(self, buf, (), |mut file, buf, _| file.read(buf))
     }
+
+    #[cfg(not(feature = "direct-io"))]
+    fn read_vectored(&mut self, bufs: &mut [io::IoSliceMut<'_>]) -> io::Result<usize> {
+        (&self.inner).read_vectored(bufs)
+    }
+
+    #[cfg(all(target_os = "linux", feature = "direct-io"))]
+    fn read_vectored(&mut self, bufs: &mut [io::IoSliceMut<'_>]) -> io::Result<usize> {
+        use std::os::unix::prelude::AsRawFd;
+
+        let mut iovs = Vec::with_capacity(bufs.len());
+        let mut tmp_bufs = Vec::with_capacity(bufs.len());
+
+        for buf in bufs.iter_mut() {
+            let buf_addr = buf.as_mut_ptr() as usize;
+            let buf_len = buf.len();
+            let align_len = buf_len.next_multiple_of(ALIGN);
+
+            if buf_addr.is_multiple_of(ALIGN) && buf_len == align_len {
+                iovs.push(libc::iovec {
+                    iov_base: buf.as_mut_ptr() as *mut _,
+                    iov_len: align_len,
+                });
+                tmp_bufs.push(None);
+            } else {
+                let mut tmp_buf = avec!(align_len);
+                iovs.push(libc::iovec {
+                    iov_base: tmp_buf.as_mut_ptr() as *mut _,
+                    iov_len: align_len,
+                });
+                tmp_bufs.push(Some(tmp_buf));
+            }
+        }
+
+        let n = unsafe {
+            libc::readv(
+                self.inner.as_raw_fd(),
+                iovs.as_ptr(),
+                iovs.len() as libc::c_int,
+            )
+        };
+
+        if n < 0 {
+            return Err(io::Error::last_os_error());
+        }
+
+        let mut remaining = n as usize;
+        for (buf, tmp_buf) in bufs.iter_mut().zip(tmp_bufs) {
+            let len = buf.len();
+            let wrote = remaining.min(len);
+
+            if let Some(tmp_buf) = tmp_buf {
+                buf.copy_from_slice(&tmp_buf[..wrote]);
+            }
+
+            remaining -= wrote;
+
+            if remaining == 0 {
+                break;
+            }
+        }
+
+        Ok(n as usize)
+    }
+
+    #[cfg(target_os = "linux")]
+    fn is_read_vectored(&self) -> bool {
+        true
+    }
 }
 
 impl Read for File {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         (&*self).read(buf)
+    }
+
+    fn read_vectored(&mut self, bufs: &mut [io::IoSliceMut<'_>]) -> io::Result<usize> {
+        (&*self).read_vectored(bufs)
+    }
+
+    fn is_read_vectored(&self) -> bool {
+        (&self).is_read_vectored()
     }
 }
 
