@@ -1,11 +1,10 @@
-#![feature(can_vector, unix_file_vectored_at)]
+#![feature(can_vector)]
+#![cfg_attr(target_family = "unix", feature(unix_file_vectored_at))]
 
 mod file;
-mod file_ext;
 mod open_options;
 
-pub use file::File;
-pub use file_ext::FileExt;
+pub use file::*;
 pub use open_options::OpenOptions;
 
 #[cfg(feature = "align-512")]

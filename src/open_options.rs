@@ -1,23 +1,26 @@
 use std::{io, path::Path};
 
+#[cfg(feature = "direct-io")]
 use parking_lot::lock_api::RwLock;
 
-use crate::{File, avec};
+use crate::File;
+#[cfg(feature = "direct-io")]
+use crate::avec;
 
 #[derive(Clone)]
 #[derive(Debug)]
 #[derive(Default)]
 pub struct OpenOptions {
-    read: bool,
-    write: bool,
-    append: bool,
-    truncate: bool,
-    create: bool,
-    create_new: bool,
+    pub(crate) read: bool,
+    pub(crate) write: bool,
+    pub(crate) append: bool,
+    pub(crate) truncate: bool,
+    pub(crate) create: bool,
+    pub(crate) create_new: bool,
 
     // special
     #[cfg(feature = "direct-io")]
-    direct_io_buffer_size: usize, // 0 means disabled
+    pub(crate) direct_io_buffer_size: usize, // 0 means disabled
 }
 
 impl OpenOptions {
