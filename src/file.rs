@@ -11,6 +11,38 @@ use parking_lot::RwLock;
 
 use crate::{ALIGN, avec, open_options::OpenOptions};
 
+pub trait Base: Sized {
+    fn open<P: AsRef<Path>>(path: P) -> io::Result<Self>;
+    fn open_options<P: AsRef<Path>>(path: P, options: &OpenOptions) -> io::Result<Self>;
+    fn create<P: AsRef<Path>>(path: P) -> io::Result<Self>;
+    fn create_new<P: AsRef<Path>>(path: P) -> io::Result<Self>;
+    fn options() -> OpenOptions;
+    fn sync_all(&self) -> io::Result<()>;
+    fn sync_data(&self) -> io::Result<()>;
+    fn lock(&self) -> io::Result<()>;
+    fn lock_shared(&self) -> io::Result<()>;
+    fn try_lock(&self) -> Result<(), std::fs::TryLockError>;
+    fn try_lock_shared(&self) -> Result<(), std::fs::TryLockError>;
+    fn unlock(&self) -> io::Result<()>;
+    fn set_len(&self, size: u64) -> io::Result<()>;
+    fn metadata(&self) -> io::Result<std::fs::Metadata>;
+    fn try_clone(&self) -> io::Result<Self>;
+    fn set_permissions(&self, perm: std::fs::Permissions) -> io::Result<()>;
+    fn set_times(&self, times: FileTimes) -> io::Result<()>;
+    fn set_modified(&self, modified: SystemTime) -> io::Result<()>;
+}
+
+pub trait PositionedExt {
+    fn read_at(&self, buf: &mut [u8], offset: u64) -> io::Result<usize>;
+    fn write_at(&self, buf: &[u8], offset: u64) -> io::Result<usize>;
+    fn write_all_at(&self, buf: &[u8], offset: u64) -> io::Result<()>;
+}
+
+pub trait VectoredExt {
+    fn read_vectored_at(&self, bufs: &mut [io::IoSliceMut<'_>], offset: u64) -> io::Result<usize>;
+    fn write_vectored_at(&self, bufs: &[io::IoSlice<'_>], offset: u64) -> io::Result<usize>;
+}
+
 pub struct File {
     pub(crate) inner: std::fs::File,
 
