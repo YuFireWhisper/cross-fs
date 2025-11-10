@@ -223,6 +223,10 @@ impl Read for &File {
             return Err(io::Error::last_os_error());
         }
 
+        if n == 0 {
+            return Ok(0);
+        }
+
         let mut remaining = n as usize;
         for (buf, tmp_buf) in bufs.iter_mut().zip(tmp_bufs) {
             let len = buf.len();
