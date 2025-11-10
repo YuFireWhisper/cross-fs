@@ -323,7 +323,13 @@ impl Read for &File {
         Ok(bytes_read as usize)
     }
 
-    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    #[cfg(not(feature = "direct-io"))]
+    fn is_read_vectored(&self) -> bool {
+        // std already supports vectored I/O for non-direct-io
+        true
+    }
+
+    #[cfg(all(feature = "direct-io", any(target_os = "linux", target_os = "windows")))]
     fn is_read_vectored(&self) -> bool {
         true
     }
@@ -478,7 +484,13 @@ impl Write for &File {
         (&self.inner).flush()
     }
 
-    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    #[cfg(not(feature = "direct-io"))]
+    fn is_write_vectored(&self) -> bool {
+        // std already supports vectored I/O for non-direct-io
+        true
+    }
+
+    #[cfg(all(feature = "direct-io", any(target_os = "linux", target_os = "windows")))]
     fn is_write_vectored(&self) -> bool {
         true
     }
