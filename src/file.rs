@@ -267,8 +267,61 @@ impl Write for &File {
         write(self, buf, (), |mut file, buf, _| file.write(buf))
     }
 
+    #[cfg(not(feature = "direct-io"))]
+    fn write_vectored(&mut self, bufs: &[io::IoSlice<'_>]) -> io::Result<usize> {
+        (&self.inner).write_vectored(bufs)
+    }
+
+    #[cfg(all(target_os = "linux", feature = "direct-io"))]
+    fn write_vectored(&mut self, bufs: &[io::IoSlice<'_>]) -> io::Result<usize> {
+        use std::os::unix::prelude::AsRawFd;
+
+        let mut iovs = Vec::with_capacity(bufs.len());
+        let mut tmp_bufs = Vec::with_capacity(bufs.len());
+
+        for buf in bufs.iter() {
+            let buf_addr = buf.as_ptr() as usize;
+            let buf_len = buf.len();
+            let align_len = buf_len.next_multiple_of(ALIGN);
+
+            if buf_addr.is_multiple_of(ALIGN) && buf_len == align_len {
+                iovs.push(libc::iovec {
+                    iov_base: buf.as_ptr() as *mut _,
+                    iov_len: buf_len,
+                });
+                tmp_bufs.push(None);
+            } else {
+                let mut tmp_buf = avec!(align_len);
+                tmp_buf[..buf_len].copy_from_slice(buf);
+                iovs.push(libc::iovec {
+                    iov_base: tmp_buf.as_ptr() as *mut _,
+                    iov_len: align_len,
+                });
+                tmp_bufs.push(Some(tmp_buf));
+            }
+        }
+
+        let n = unsafe {
+            libc::writev(
+                self.inner.as_raw_fd(),
+                iovs.as_ptr(),
+                iovs.len() as libc::c_int,
+            )
+        };
+
+        if n < 0 {
+            return Err(io::Error::last_os_error());
+        }
+
+        Ok(n as usize)
+    }
+
     fn flush(&mut self) -> io::Result<()> {
         (&self.inner).flush()
+    }
+
+    fn is_write_vectored(&self) -> bool {
+        true
     }
 }
 
@@ -277,8 +330,16 @@ impl Write for File {
         (&*self).write(buf)
     }
 
+    fn write_vectored(&mut self, bufs: &[io::IoSlice<'_>]) -> io::Result<usize> {
+        (&*self).write_vectored(bufs)
+    }
+
     fn flush(&mut self) -> io::Result<()> {
         (&*self).flush()
+    }
+
+    fn is_write_vectored(&self) -> bool {
+        (&self).is_write_vectored()
     }
 }
 
