@@ -265,6 +265,26 @@ pub mod impl_unix {
             })
         }
     }
+
+    impl crate::FileExt for File {
+        fn read_at(&self, buf: &mut [u8], offset: u64) -> io::Result<usize> {
+            read(self, buf, offset, |file, buf, offset| {
+                file.read_at(buf, offset)
+            })
+        }
+
+        fn write_at(&self, buf: &[u8], offset: u64) -> io::Result<usize> {
+            write(self, buf, offset, |file, buf, offset| {
+                file.write_at(buf, offset)
+            })
+        }
+
+        fn write_all_at(&self, buf: &[u8], offset: u64) -> io::Result<()> {
+            write(self, buf, offset, |file, buf, offset| {
+                file.write_all_at(buf, offset)
+            })
+        }
+    }
 }
 
 #[cfg(windows)]
@@ -314,6 +334,38 @@ pub mod impl_windows {
             write(self, buf, offset, |file, buf, offset| {
                 file.seek_write(buf, offset)
             })
+        }
+    }
+
+    impl crate::FileExt for File {
+        fn read_at(&self, buf: &mut [u8], offset: u64) -> io::Result<usize> {
+            read(self, buf, offset, |file, buf, offset| {
+                file.seek_read(buf, offset)
+            })
+        }
+
+        fn write_at(&self, buf: &[u8], offset: u64) -> io::Result<usize> {
+            write(self, buf, offset, |file, buf, offset| {
+                file.seek_write(buf, offset)
+            })
+        }
+
+        fn write_all_at(&self, mut buf: &[u8], mut offset: u64) -> io::Result<()> {
+            while !buf.is_empty() {
+                match self.write_at(buf, offset)? {
+                    0 => {
+                        return Err(io::Error::new(
+                            io::ErrorKind::WriteZero,
+                            "failed to write whole buffer",
+                        ));
+                    }
+                    n => {
+                        buf = &buf[n..];
+                        offset += n as u64;
+                    }
+                }
+            }
+            Ok(())
         }
     }
 }

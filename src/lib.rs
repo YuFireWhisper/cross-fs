@@ -1,8 +1,10 @@
 mod file;
+mod file_ext;
 mod open_options;
 mod utils;
 
 pub use file::File;
+pub use file_ext::FileExt;
 pub use open_options::OpenOptions;
 
 #[cfg(test)]
