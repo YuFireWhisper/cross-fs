@@ -28,7 +28,7 @@ macro_rules! avec {
 
 #[cfg(test)]
 mod tests {
-    use std::io::{IoSliceMut, Read, Seek, SeekFrom, Write};
+    use std::io::{Read, Seek, SeekFrom, Write};
 
     use tempfile::tempdir;
 
