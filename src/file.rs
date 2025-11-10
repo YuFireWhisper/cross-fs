@@ -106,23 +106,24 @@ where
 {
     #[cfg(feature = "direct-io")]
     {
-        assert!(
-            buf.len().is_multiple_of(ALIGN),
-            "Buffer length must be a multiple of ALIGN"
-        );
-
         if (buf.as_ptr() as usize).is_multiple_of(ALIGN) {
             return f(&file.inner, buf, other);
         }
 
-        if buf.len() > file.direct_io_buffer_size {
-            let mut dbuf = avec!(buf.len());
-            let n = f(&file.inner, &mut dbuf[..buf.len()], other)?;
+        let len = if buf.len().is_multiple_of(ALIGN) {
+            buf.len()
+        } else {
+            buf.len().next_multiple_of(ALIGN)
+        };
+
+        if len > file.direct_io_buffer_size {
+            let mut dbuf = avec!(len);
+            let n = f(&file.inner, &mut dbuf, other)?.min(buf.len());
             buf[..n].copy_from_slice(&dbuf[..n]);
             Ok(n)
         } else {
             let mut dbuf = file.direct_io_buffer.write();
-            let n = f(&file.inner, &mut dbuf[..buf.len()], other)?;
+            let n = f(&file.inner, &mut dbuf[..len], other)?.min(buf.len());
             buf[..n].copy_from_slice(&dbuf[..n]);
             Ok(n)
         }
