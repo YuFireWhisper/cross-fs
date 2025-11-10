@@ -21,7 +21,6 @@ dependencies = [
  "libc",
  "parking_lot",
  "tempfile",
- "windows-sys",
 ]
 
 [[package]]
