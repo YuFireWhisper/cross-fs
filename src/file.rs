@@ -106,6 +106,11 @@ where
 {
     #[cfg(feature = "direct-io")]
     {
+        assert!(
+            buf.len().is_multiple_of(ALIGN),
+            "Buffer length must be a multiple of ALIGN"
+        );
+
         if (buf.as_ptr() as usize).is_multiple_of(ALIGN) {
             return f(&file.inner, buf, other);
         }
@@ -135,6 +140,11 @@ where
 {
     #[cfg(feature = "direct-io")]
     {
+        assert!(
+            buf.len().is_multiple_of(ALIGN),
+            "Buffer length must be a multiple of ALIGN"
+        );
+
         if (buf.as_ptr() as usize).is_multiple_of(ALIGN) {
             return f(&file.inner, buf, other);
         }
