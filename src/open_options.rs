@@ -80,7 +80,7 @@ impl OpenOptions {
             {
                 use std::os::unix::fs::OpenOptionsExt;
 
-                use crate::alloc_aligend_buffer;
+                use crate::utils::alloc_aligend_buffer;
 
                 opts.custom_flags(libc::O_DIRECT);
                 direct_io_buffer = Some(alloc_aligend_buffer(self.direct_io_buffer_size));
@@ -90,7 +90,7 @@ impl OpenOptions {
             {
                 use std::os::windows::fs::OpenOptionsExt;
 
-                use crate::alloc_aligend_buffer;
+                use crate::utils::alloc_aligend_buffer;
                 use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_NO_BUFFERING;
 
                 opts.custom_flags(FILE_FLAG_NO_BUFFERING);

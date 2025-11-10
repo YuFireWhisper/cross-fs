@@ -9,7 +9,7 @@ use std::{
 
 use parking_lot::RwLock;
 
-use crate::{alloc_aligend_buffer, open_options::OpenOptions};
+use crate::{open_options::OpenOptions, utils::alloc_aligend_buffer};
 
 pub struct File {
     pub(crate) inner: std::fs::File,
@@ -198,7 +198,7 @@ pub mod impl_unix {
         },
     };
 
-    use crate::alloc_aligend_buffer;
+    use crate::utils::alloc_aligend_buffer;
 
     use super::File;
 
@@ -300,7 +300,7 @@ pub mod impl_windows {
         },
     };
 
-    use crate::alloc_aligend_buffer;
+    use crate::utils::alloc_aligend_buffer;
 
     use super::File;
 
