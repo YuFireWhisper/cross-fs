@@ -401,10 +401,84 @@ impl Write for &File {
         Ok(n as usize)
     }
 
+    #[cfg(all(target_os = "windows", feature = "direct-io"))]
+    fn write_vectored(&mut self, bufs: &[io::IoSlice<'_>]) -> io::Result<usize> {
+        use std::os::windows::io::AsRawHandle;
+
+        use windows_sys::Win32::{
+            Storage::FileSystem::{FILE_SEGMENT_ELEMENT, WriteFileGather},
+            System::IO::{GetOverlappedResult, OVERLAPPED},
+        };
+
+        let mut segments: Vec<FILE_SEGMENT_ELEMENT> = Vec::with_capacity(bufs.len() + 1);
+        let mut tmp_bufs = Vec::new();
+        let mut total_len = 0;
+
+        for buf in bufs.iter() {
+            let buf_addr = buf.as_ptr() as usize;
+            let buf_len = buf.len();
+
+            assert!(
+                buf_len.is_multiple_of(ALIGN),
+                "Buffer length must be a multiple of ALIGN"
+            );
+
+            if buf_addr.is_multiple_of(ALIGN) {
+                segments.push(FILE_SEGMENT_ELEMENT {
+                    Buffer: buf.as_ptr() as *mut _,
+                });
+                tmp_bufs.push(None);
+            } else {
+                let mut tmp_buf = avec!(buf_len);
+                tmp_buf[..buf_len].copy_from_slice(buf);
+                segments.push(FILE_SEGMENT_ELEMENT {
+                    Buffer: tmp_buf.as_ptr() as *mut _,
+                });
+                tmp_bufs.push(Some(tmp_buf));
+            }
+
+            total_len += buf_len;
+        }
+
+        segments.push(unsafe { std::mem::zeroed() });
+        let mut overlapped: OVERLAPPED = unsafe { std::mem::zeroed() };
+
+        let result = unsafe {
+            WriteFileGather(
+                self.inner.as_raw_handle(),
+                segments.as_ptr(),
+                total_len as u32,
+                std::ptr::null_mut(),
+                &mut overlapped,
+            )
+        };
+
+        if result == 0 {
+            return Err(io::Error::last_os_error());
+        }
+
+        let mut bytes_written = 0u32;
+        let overlapped_result = unsafe {
+            GetOverlappedResult(
+                self.inner.as_raw_handle(),
+                &overlapped,
+                &mut bytes_written,
+                1,
+            )
+        };
+
+        if overlapped_result == 0 {
+            return Err(io::Error::last_os_error());
+        }
+
+        Ok(bytes_written as usize)
+    }
+
     fn flush(&mut self) -> io::Result<()> {
         (&self.inner).flush()
     }
 
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
     fn is_write_vectored(&self) -> bool {
         true
     }
