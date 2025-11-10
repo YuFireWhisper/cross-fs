@@ -16,6 +16,7 @@ pub struct OpenOptions {
     create_new: bool,
 
     // special
+    #[cfg(feature = "direct-io")]
     direct_io_buffer_size: usize, // 0 means disabled
 }
 
@@ -59,6 +60,7 @@ impl OpenOptions {
     /// # Arguments
     ///
     /// * `buffer_size` - The size of the buffer to be used for direct I/O. A value of 0 disables direct I/O.
+    #[cfg(feature = "direct-io")]
     pub fn direct_io(&mut self, buffer_size: usize) -> &mut Self {
         self.direct_io_buffer_size = buffer_size;
         self
@@ -73,36 +75,46 @@ impl OpenOptions {
         opts.create(self.create);
         opts.create_new(self.create_new);
 
-        let mut direct_io_buffer = None;
+        #[cfg(feature = "direct-io")]
+        {
+            let mut direct_io_buffer = None;
 
-        if self.direct_io_buffer_size > 0 {
-            #[cfg(target_os = "linux")]
-            {
-                use std::os::unix::fs::OpenOptionsExt;
+            if self.direct_io_buffer_size > 0 {
+                #[cfg(target_os = "linux")]
+                {
+                    use std::os::unix::fs::OpenOptionsExt;
 
-                use crate::utils::alloc_aligend_buffer;
+                    use crate::utils::alloc_aligend_buffer;
 
-                opts.custom_flags(libc::O_DIRECT);
-                direct_io_buffer = Some(alloc_aligend_buffer(self.direct_io_buffer_size));
+                    opts.custom_flags(libc::O_DIRECT);
+                    direct_io_buffer = Some(alloc_aligend_buffer(self.direct_io_buffer_size));
+                }
+
+                #[cfg(windows)]
+                {
+                    use std::os::windows::fs::OpenOptionsExt;
+
+                    use crate::utils::alloc_aligend_buffer;
+                    use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_NO_BUFFERING;
+
+                    opts.custom_flags(FILE_FLAG_NO_BUFFERING);
+                    direct_io_buffer = Some(alloc_aligend_buffer(self.direct_io_buffer_size));
+                }
             }
 
-            #[cfg(windows)]
-            {
-                use std::os::windows::fs::OpenOptionsExt;
+            let base = opts.open(path)?;
 
-                use crate::utils::alloc_aligend_buffer;
-                use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_NO_BUFFERING;
-
-                opts.custom_flags(FILE_FLAG_NO_BUFFERING);
-                direct_io_buffer = Some(alloc_aligend_buffer(self.direct_io_buffer_size));
-            }
+            Ok(File {
+                inner: base,
+                direct_io_buffer: RwLock::new(direct_io_buffer.unwrap_or_default()),
+            })
         }
 
-        let base = opts.open(path)?;
-
-        Ok(File {
-            inner: base,
-            direct_io_buffer: RwLock::new(direct_io_buffer.unwrap_or_default()),
-        })
+        #[cfg(not(feature = "direct-io"))]
+        {
+            Ok(File {
+                inner: opts.open(path)?,
+            })
+        }
     }
 }

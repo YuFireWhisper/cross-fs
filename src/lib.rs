@@ -47,6 +47,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "direct-io")]
     fn direct_io_read_write() {
         let file = File::options()
             .read(true)
