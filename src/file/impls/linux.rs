@@ -10,117 +10,118 @@ use crate::{ALIGN, LENGTH_NON_ALIGNED_ERROR, avec};
 use crate::{File, PositionedExt, VectoredExt};
 
 #[cfg(feature = "direct-io")]
-fn read_vectored_handler<F>(
-    file: &File,
-    bufs: &mut [io::IoSliceMut<'_>],
-    offset: u64,
-    read_fn: F,
-) -> io::Result<usize>
-where
-    F: Fn(RawFd, *const libc::iovec, libc::c_int, libc::off_t) -> libc::ssize_t,
-{
-    let bufs_len = bufs.len();
-    let mut iovs = Vec::with_capacity(bufs_len);
-    let mut tmp_bufs = Vec::with_capacity(bufs_len);
+impl File {
+    fn read_vectored_handler<F>(
+        &self,
+        bufs: &mut [io::IoSliceMut<'_>],
+        offset: u64,
+        f: F,
+    ) -> io::Result<usize>
+    where
+        F: Fn(RawFd, *const libc::iovec, libc::c_int, libc::off_t) -> libc::ssize_t,
+    {
+        let bufs_len = bufs.len();
+        let mut iovs = Vec::with_capacity(bufs_len);
+        let mut tmp_bufs = Vec::with_capacity(bufs_len);
 
-    for buf in bufs.iter_mut() {
-        let buf_addr = buf.as_mut_ptr() as usize;
-        let buf_len = buf.len();
-        let aligned_len = buf_len.next_multiple_of(ALIGN);
+        for buf in bufs.iter_mut() {
+            let buf_addr = buf.as_mut_ptr() as usize;
+            let buf_len = buf.len();
+            let aligned_len = buf_len.next_multiple_of(ALIGN);
 
-        if buf_addr.is_multiple_of(ALIGN) && buf_len == aligned_len {
-            iovs.push(libc::iovec {
-                iov_base: buf.as_mut_ptr() as *mut _,
-                iov_len: aligned_len,
-            });
-            tmp_bufs.push(None);
-        } else {
-            let mut tmp_buf = avec!(aligned_len);
-            iovs.push(libc::iovec {
-                iov_base: tmp_buf.as_mut_ptr() as *mut _,
-                iov_len: aligned_len,
-            });
-            tmp_bufs.push(Some(tmp_buf));
-        }
-    }
-
-    match read_fn(
-        file.inner.as_raw_fd(),
-        iovs.as_ptr(),
-        bufs_len as _,
-        offset as _,
-    ) {
-        n if n < 0 => Err(io::Error::last_os_error()),
-        0 => Ok(0),
-        n => {
-            let n = n as usize;
-            let mut remaining = n;
-            for (buf, tmp_buf) in bufs.iter_mut().zip(tmp_bufs) {
-                let len = buf.len();
-                let read = remaining.min(len);
-
-                if let Some(tmp_buf) = tmp_buf {
-                    buf.copy_from_slice(&tmp_buf[..read]);
-                }
-
-                remaining -= read;
-
-                if remaining == 0 {
-                    break;
-                }
+            if buf_addr.is_multiple_of(ALIGN) && buf_len == aligned_len {
+                iovs.push(libc::iovec {
+                    iov_base: buf.as_mut_ptr() as *mut _,
+                    iov_len: aligned_len,
+                });
+                tmp_bufs.push(None);
+            } else {
+                let mut tmp_buf = avec!(aligned_len);
+                iovs.push(libc::iovec {
+                    iov_base: tmp_buf.as_mut_ptr() as *mut _,
+                    iov_len: aligned_len,
+                });
+                tmp_bufs.push(Some(tmp_buf));
             }
-            Ok(n)
-        }
-    }
-}
-
-#[cfg(feature = "direct-io")]
-fn write_vectored_handler<F>(
-    file: &File,
-    bufs: &[io::IoSlice<'_>],
-    offset: u64,
-    write_fn: F,
-) -> io::Result<usize>
-where
-    F: Fn(RawFd, *const libc::iovec, libc::c_int, libc::off_t) -> libc::ssize_t,
-{
-    let bufs_len = bufs.len();
-    let mut iovs = Vec::with_capacity(bufs_len);
-    let mut tmp_bufs = Vec::with_capacity(bufs_len);
-
-    for buf in bufs.iter() {
-        let buf_addr = buf.as_ptr() as usize;
-        let buf_len = buf.len();
-
-        if !buf_len.is_multiple_of(ALIGN) {
-            return Err(LENGTH_NON_ALIGNED_ERROR);
         }
 
-        if buf_addr.is_multiple_of(ALIGN) {
-            iovs.push(libc::iovec {
-                iov_base: buf.as_ptr() as *mut _,
-                iov_len: buf_len,
-            });
-            tmp_bufs.push(None);
-        } else {
-            let mut tmp_buf = avec!(buf_len);
-            tmp_buf[..buf_len].copy_from_slice(buf);
-            iovs.push(libc::iovec {
-                iov_base: tmp_buf.as_mut_ptr() as *mut _,
-                iov_len: buf_len,
-            });
-            tmp_bufs.push(Some(tmp_buf));
+        match f(
+            self.inner.as_raw_fd(),
+            iovs.as_ptr(),
+            bufs_len as _,
+            offset as _,
+        ) {
+            n if n < 0 => Err(io::Error::last_os_error()),
+            0 => Ok(0),
+            n => {
+                let n = n as usize;
+                let mut remaining = n;
+                for (buf, tmp_buf) in bufs.iter_mut().zip(tmp_bufs) {
+                    let len = buf.len();
+                    let read = remaining.min(len);
+
+                    if let Some(tmp_buf) = tmp_buf {
+                        buf.copy_from_slice(&tmp_buf[..read]);
+                    }
+
+                    remaining -= read;
+
+                    if remaining == 0 {
+                        break;
+                    }
+                }
+                Ok(n)
+            }
         }
     }
 
-    match write_fn(
-        file.inner.as_raw_fd(),
-        iovs.as_ptr(),
-        bufs_len as _,
-        offset as _,
-    ) {
-        n if n < 0 => Err(io::Error::last_os_error()),
-        n => Ok(n as usize),
+    fn write_vectored_handler<F>(
+        &self,
+        bufs: &[io::IoSlice<'_>],
+        offset: u64,
+        f: F,
+    ) -> io::Result<usize>
+    where
+        F: Fn(RawFd, *const libc::iovec, libc::c_int, libc::off_t) -> libc::ssize_t,
+    {
+        let bufs_len = bufs.len();
+        let mut iovs = Vec::with_capacity(bufs_len);
+        let mut tmp_bufs = Vec::with_capacity(bufs_len);
+
+        for buf in bufs.iter() {
+            let buf_addr = buf.as_ptr() as usize;
+            let buf_len = buf.len();
+
+            if !buf_len.is_multiple_of(ALIGN) {
+                return Err(LENGTH_NON_ALIGNED_ERROR);
+            }
+
+            if buf_addr.is_multiple_of(ALIGN) {
+                iovs.push(libc::iovec {
+                    iov_base: buf.as_ptr() as *mut _,
+                    iov_len: buf_len,
+                });
+                tmp_bufs.push(None);
+            } else {
+                let mut tmp_buf = avec!(buf_len);
+                tmp_buf[..buf_len].copy_from_slice(buf);
+                iovs.push(libc::iovec {
+                    iov_base: tmp_buf.as_mut_ptr() as *mut _,
+                    iov_len: buf_len,
+                });
+                tmp_bufs.push(Some(tmp_buf));
+            }
+        }
+
+        match f(
+            self.inner.as_raw_fd(),
+            iovs.as_ptr(),
+            bufs_len as _,
+            offset as _,
+        ) {
+            n if n < 0 => Err(io::Error::last_os_error()),
+            n => Ok(n as usize),
+        }
     }
 }
 
@@ -131,7 +132,7 @@ impl Read for &File {
 
     #[cfg(feature = "direct-io")]
     fn read_vectored(&mut self, bufs: &mut [io::IoSliceMut<'_>]) -> io::Result<usize> {
-        read_vectored_handler(self, bufs, 0, |fd, ptr, len, _| unsafe {
+        self.read_vectored_handler(bufs, 0, |fd, ptr, len, _| unsafe {
             libc::readv(fd, ptr, len)
         })
     }
@@ -174,7 +175,7 @@ impl Write for &File {
 
     #[cfg(feature = "direct-io")]
     fn write_vectored(&mut self, bufs: &[io::IoSlice<'_>]) -> io::Result<usize> {
-        write_vectored_handler(self, bufs, 0, |fd, ptr, len, _| unsafe {
+        self.write_vectored_handler(bufs, 0, |fd, ptr, len, _| unsafe {
             libc::writev(fd, ptr, len)
         })
     }
@@ -231,7 +232,7 @@ impl PositionedExt for File {
 impl VectoredExt for File {
     #[cfg(feature = "direct-io")]
     fn read_vectored_at(&self, bufs: &mut [io::IoSliceMut<'_>], offset: u64) -> io::Result<usize> {
-        read_vectored_handler(self, bufs, offset, |fd, ptr, len, off| unsafe {
+        self.read_vectored_handler(bufs, offset, |fd, ptr, len, off| unsafe {
             libc::preadv(fd, ptr, len, off)
         })
     }
@@ -243,7 +244,7 @@ impl VectoredExt for File {
 
     #[cfg(feature = "direct-io")]
     fn write_vectored_at(&self, bufs: &[io::IoSlice<'_>], offset: u64) -> io::Result<usize> {
-        write_vectored_handler(self, bufs, offset, |fd, ptr, len, off| unsafe {
+        self.write_vectored_handler(bufs, offset, |fd, ptr, len, off| unsafe {
             libc::pwritev(fd, ptr, len, off)
         })
     }
