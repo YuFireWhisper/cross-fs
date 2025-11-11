@@ -47,11 +47,7 @@ pub trait VectoredExt {
 
 pub struct File {
     pub(crate) inner: std::fs::File,
-
-    #[cfg(feature = "direct-io")]
-    pub(crate) direct_io_buffer: RwLock<Vec<u8>>,
-    #[cfg(feature = "direct-io")]
-    pub(crate) direct_io_buffer_size: usize,
+    pub(crate) enable_direct_io: bool,
 }
 
 impl File {

@@ -1,11 +1,6 @@
 use std::{io, path::Path};
 
-#[cfg(feature = "direct-io")]
-use parking_lot::lock_api::RwLock;
-
 use crate::File;
-#[cfg(feature = "direct-io")]
-use crate::avec;
 
 #[derive(Clone)]
 #[derive(Debug)]
@@ -17,10 +12,7 @@ pub struct OpenOptions {
     pub(crate) truncate: bool,
     pub(crate) create: bool,
     pub(crate) create_new: bool,
-
-    // special
-    #[cfg(feature = "direct-io")]
-    pub(crate) direct_io_buffer_size: usize, // 0 means disabled
+    pub(crate) direct_io: bool,
 }
 
 impl OpenOptions {
@@ -58,14 +50,8 @@ impl OpenOptions {
         self
     }
 
-    /// Set the buffer size for direct I/O operations.
-    ///
-    /// # Arguments
-    ///
-    /// * `buffer_size` - The size of the buffer to be used for direct I/O. A value of 0 disables direct I/O.
-    #[cfg(feature = "direct-io")]
-    pub fn direct_io(&mut self, buffer_size: usize) -> &mut Self {
-        self.direct_io_buffer_size = buffer_size;
+    pub fn direct_io(&mut self, enable: bool) -> &mut Self {
+        self.direct_io = enable;
         self
     }
 
@@ -78,44 +64,23 @@ impl OpenOptions {
         opts.create(self.create);
         opts.create_new(self.create_new);
 
-        #[cfg(feature = "direct-io")]
-        {
-            let mut direct_io_buffer = None;
-
-            if self.direct_io_buffer_size > 0 {
-                #[cfg(target_os = "linux")]
-                {
-                    use std::os::unix::fs::OpenOptionsExt;
-
-                    opts.custom_flags(libc::O_DIRECT);
-                    direct_io_buffer = Some(avec!(self.direct_io_buffer_size));
-                }
-
-                #[cfg(target_os = "windows")]
-                {
-                    use std::os::windows::fs::OpenOptionsExt;
-
-                    use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_NO_BUFFERING;
-
-                    opts.custom_flags(FILE_FLAG_NO_BUFFERING);
-                    direct_io_buffer = Some(avec!(self.direct_io_buffer_size));
-                }
+        if self.direct_io {
+            #[cfg(target_os = "linux")]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                opts.custom_flags(libc::O_DIRECT);
             }
 
-            let base = opts.open(path)?;
-
-            Ok(File {
-                inner: base,
-                direct_io_buffer: RwLock::new(direct_io_buffer.unwrap_or_default()),
-                direct_io_buffer_size: self.direct_io_buffer_size,
-            })
+            #[cfg(target_os = "windows")]
+            {
+                use std::os::windows::fs::OpenOptionsExt;
+                opts.custom_flags(windows_sys::Win32::Storage::FileSystem::FILE_FLAG_NO_BUFFERING);
+            }
         }
 
-        #[cfg(not(feature = "direct-io"))]
-        {
-            Ok(File {
-                inner: opts.open(path)?,
-            })
-        }
+        Ok(File {
+            inner: opts.open(path)?,
+            enable_direct_io: self.direct_io,
+        })
     }
 }
