@@ -22,6 +22,10 @@ impl File {
     where
         F: Fn(RawFd, *const libc::iovec, libc::c_int, libc::off_t) -> libc::ssize_t,
     {
+        if self.direct_io_buffer_size == 0 {
+            return (&self.inner).read_vectored(bufs);
+        }
+
         let bufs_len = bufs.len();
         let mut iovs = Vec::with_capacity(bufs_len);
         let mut tmp_bufs = Vec::with_capacity(bufs_len);
@@ -86,6 +90,10 @@ impl File {
     where
         F: Fn(RawFd, *const libc::iovec, libc::c_int, libc::off_t) -> libc::ssize_t,
     {
+        if self.direct_io_buffer_size == 0 {
+            return (&self.inner).write_vectored(bufs);
+        }
+
         let bufs_len = bufs.len();
         let mut iovs = Vec::with_capacity(bufs_len);
         let mut tmp_bufs = Vec::with_capacity(bufs_len);
@@ -171,6 +179,9 @@ impl Read for &File {
     #[cfg(feature = "direct-io")]
     #[inline]
     fn is_read_vectored(&self) -> bool {
+        if self.direct_io_buffer_size == 0 {
+            return self.inner.is_read_vectored();
+        }
         true
     }
 
@@ -214,6 +225,9 @@ impl Write for &File {
     #[cfg(feature = "direct-io")]
     #[inline]
     fn is_write_vectored(&self) -> bool {
+        if self.direct_io_buffer_size == 0 {
+            return self.inner.is_write_vectored();
+        }
         true
     }
 

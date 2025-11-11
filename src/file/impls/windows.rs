@@ -26,6 +26,10 @@ fn read_vectored_handler(
     bufs: &mut [io::IoSliceMut<'_>],
     offset: Option<u64>,
 ) -> io::Result<usize> {
+    if file.direct_io_buffer_size == 0 {
+        return (&file.inner).read_vectored(bufs);
+    }
+
     let bufs_len = bufs.len();
     let mut segments = Vec::with_capacity(bufs_len + 1);
     let mut tmp_bufs = Vec::with_capacity(bufs_len);
@@ -110,6 +114,10 @@ fn write_vectored_handler(
     bufs: &[io::IoSlice<'_>],
     offset: Option<u64>,
 ) -> io::Result<usize> {
+    if file.direct_io_buffer_size == 0 {
+        return (&file.inner).write_vectored(bufs);
+    }
+
     let bufs_len = bufs.len();
     let mut segments: Vec<FILE_SEGMENT_ELEMENT> = Vec::with_capacity(bufs_len + 1);
     let mut tmp_bufs = Vec::with_capacity(bufs_len);
@@ -213,6 +221,9 @@ impl Read for &File {
     #[cfg(feature = "direct-io")]
     #[inline]
     fn is_read_vectored(&self) -> bool {
+        if self.direct_io_buffer_size == 0 {
+            return self.inner.is_read_vectored();
+        }
         true
     }
 
@@ -254,6 +265,9 @@ impl Write for &File {
     #[cfg(feature = "direct-io")]
     #[inline]
     fn is_write_vectored(&self) -> bool {
+        if self.direct_io_buffer_size == 0 {
+            return self.inner.is_write_vectored();
+        }
         true
     }
 
@@ -297,10 +311,20 @@ impl PositionedExt for File {
 #[cfg(feature = "direct-io")]
 impl VectoredExt for File {
     fn read_vectored_at(&self, bufs: &mut [io::IoSliceMut<'_>], offset: u64) -> io::Result<usize> {
+        if self.direct_io_buffer_size == 0 {
+            return Err(io::Error::other(
+                "Vectored I/O requires Direct I/O to be enabled",
+            ));
+        }
         read_vectored_handler(self, bufs, Some(offset))
     }
 
     fn write_vectored_at(&self, bufs: &[io::IoSlice<'_>], offset: u64) -> io::Result<usize> {
+        if self.direct_io_buffer_size == 0 {
+            return Err(io::Error::other(
+                "Vectored I/O requires Direct I/O to be enabled",
+            ));
+        }
         write_vectored_handler(self, bufs, Some(offset))
     }
 }
