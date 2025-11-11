@@ -91,7 +91,7 @@ impl OpenOptions {
                     direct_io_buffer = Some(avec!(self.direct_io_buffer_size));
                 }
 
-                #[cfg(windows)]
+                #[cfg(target_os = "windows")]
                 {
                     use std::os::windows::fs::OpenOptionsExt;
 
