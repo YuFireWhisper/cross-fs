@@ -1,4 +1,4 @@
-#![feature(can_vector)]
+#![feature(can_vector, io_const_error)]
 #![cfg_attr(target_family = "unix", feature(unix_file_vectored_at))]
 
 mod file;

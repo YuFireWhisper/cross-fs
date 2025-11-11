@@ -17,7 +17,7 @@ use crate::{
     avec,
     file::{
         VectoredExt,
-        impls::{ALIGN, read_helper, write_helper},
+        impls::{ALIGN, LENGTH_NON_ALIGNED_ERROR, read_helper, write_helper},
     },
 };
 
@@ -158,13 +158,7 @@ impl Write for &File {
             let buf_len = buf.len();
 
             if !buf_len.is_multiple_of(ALIGN) {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    format!(
-                        "Buffer length must be a multiple of {}, got {}",
-                        ALIGN, buf_len
-                    ),
-                ));
+                return Err(LENGTH_NON_ALIGNED_ERROR);
             }
 
             if buf_addr.is_multiple_of(ALIGN) {
@@ -360,13 +354,7 @@ impl VectoredExt for File {
             let buf_len = buf.len();
 
             if !buf_len.is_multiple_of(ALIGN) {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    format!(
-                        "Buffer length must be a multiple of {}, got {}",
-                        ALIGN, buf_len
-                    ),
-                ));
+                return Err(LENGTH_NON_ALIGNED_ERROR);
             }
 
             if buf_addr.is_multiple_of(ALIGN) {

@@ -10,6 +10,11 @@ pub mod linux;
 #[cfg(target_os = "windows")]
 pub mod windows;
 
+const LENGTH_NON_ALIGNED_ERROR: io::Error = io::const_error!(
+    io::ErrorKind::InvalidInput,
+    "Buffer length must be a multiple of ALIGN"
+);
+
 #[cfg(feature = "direct-io")]
 fn read_helper<F, T>(file: &File, buf: &mut [u8], other: T, f: F) -> io::Result<usize>
 where

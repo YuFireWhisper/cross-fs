@@ -8,7 +8,7 @@ use std::{
 #[cfg(feature = "direct-io")]
 use crate::{
     ALIGN, avec,
-    file::impls::{read_helper, write_helper},
+    file::impls::{LENGTH_NON_ALIGNED_ERROR, read_helper, write_helper},
 };
 use crate::{
     File,
@@ -137,13 +137,7 @@ impl Write for &File {
             let buf_len = buf.len();
 
             if !buf_len.is_multiple_of(ALIGN) {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    format!(
-                        "Buffer length must be a multiple of {}, got {}",
-                        ALIGN, buf_len
-                    ),
-                ));
+                return Err(LENGTH_NON_ALIGNED_ERROR);
             }
 
             if buf_addr.is_multiple_of(ALIGN) {
@@ -300,13 +294,7 @@ impl VectoredExt for File {
             let buf_len = buf.len();
 
             if !buf_len.is_multiple_of(ALIGN) {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    format!(
-                        "Buffer length must be a multiple of {}, got {}",
-                        ALIGN, buf_len
-                    ),
-                ));
+                return Err(LENGTH_NON_ALIGNED_ERROR);
             }
 
             if buf_addr.is_multiple_of(ALIGN) {
