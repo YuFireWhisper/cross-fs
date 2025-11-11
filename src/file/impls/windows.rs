@@ -105,6 +105,73 @@ fn read_vectored_handler(
     Ok(bytes_read)
 }
 
+#[cfg(feature = "direct-io")]
+fn write_vectored_handler(
+    file: &File,
+    bufs: &[io::IoSlice<'_>],
+    offset: Option<u64>,
+) -> io::Result<usize> {
+    let bufs_len = bufs.len();
+    let mut segments: Vec<FILE_SEGMENT_ELEMENT> = Vec::with_capacity(bufs_len + 1);
+    let mut tmp_bufs = Vec::with_capacity(bufs_len);
+    let mut total_len = 0;
+
+    for buf in bufs {
+        let buf_addr = buf.as_ptr() as usize;
+        let buf_len = buf.len();
+
+        if !buf_len.is_multiple_of(ALIGN) {
+            return Err(LENGTH_NON_ALIGNED_ERROR);
+        }
+
+        if buf_addr.is_multiple_of(ALIGN) {
+            segments.push(FILE_SEGMENT_ELEMENT {
+                Buffer: buf.as_ptr() as *mut _,
+            });
+            tmp_bufs.push(None);
+        } else {
+            let mut tmp_buf = avec!(buf_len);
+            tmp_buf[..buf_len].copy_from_slice(buf);
+            segments.push(FILE_SEGMENT_ELEMENT {
+                Buffer: tmp_buf.as_mut_ptr() as *mut _,
+            });
+            tmp_bufs.push(Some(tmp_buf));
+        }
+
+        total_len += buf_len;
+    }
+
+    segments.push(unsafe { std::mem::zeroed() });
+
+    let mut overlapped: OVERLAPPED = unsafe { std::mem::zeroed() };
+    if let Some(off) = offset {
+        overlapped.Anonymous.Anonymous.Offset = (off & 0xFFFFFFFF) as u32;
+        overlapped.Anonymous.Anonymous.OffsetHigh = (off >> 32) as u32;
+    }
+    let raw_handle: HANDLE = file.inner.as_raw_handle() as _;
+
+    if unsafe {
+        WriteFileGather(
+            raw_handle,
+            segments.as_ptr(),
+            total_len as u32,
+            std::ptr::null_mut(),
+            &mut overlapped,
+        )
+    } == 0
+    {
+        return Err(io::Error::last_os_error());
+    }
+
+    let mut bytes_written: u32 = 0;
+
+    if unsafe { GetOverlappedResult(raw_handle, &overlapped, &mut bytes_written, 1) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+
+    Ok(bytes_written as usize)
+}
+
 impl Read for &File {
     #[cfg(feature = "direct-io")]
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
@@ -158,64 +225,7 @@ impl Write for &File {
 
     #[cfg(feature = "direct-io")]
     fn write_vectored(&mut self, bufs: &[std::io::IoSlice<'_>]) -> io::Result<usize> {
-        let bufs_len = bufs.len();
-        let mut segments: Vec<FILE_SEGMENT_ELEMENT> = Vec::with_capacity(bufs_len + 1);
-        let mut tmp_bufs = Vec::with_capacity(bufs_len);
-        let mut total_len = 0;
-
-        for buf in bufs.iter() {
-            let buf_addr = buf.as_ptr() as usize;
-            let buf_len = buf.len();
-
-            if !buf_len.is_multiple_of(ALIGN) {
-                return Err(LENGTH_NON_ALIGNED_ERROR);
-            }
-
-            if buf_addr.is_multiple_of(ALIGN) {
-                segments.push(FILE_SEGMENT_ELEMENT {
-                    Buffer: buf.as_ptr() as *mut _,
-                });
-                tmp_bufs.push(None);
-            } else {
-                let mut tmp_buf = avec!(buf_len);
-                tmp_buf[..buf_len].copy_from_slice(buf);
-                segments.push(FILE_SEGMENT_ELEMENT {
-                    Buffer: tmp_buf.as_mut_ptr() as *mut _,
-                });
-                tmp_bufs.push(Some(tmp_buf));
-            }
-
-            total_len += buf_len;
-        }
-
-        segments.push(unsafe { std::mem::zeroed() });
-
-        let mut overlapped: OVERLAPPED = unsafe { std::mem::zeroed() };
-        let raw_handle: HANDLE = self.inner.as_raw_handle() as _;
-
-        let result = unsafe {
-            WriteFileGather(
-                raw_handle,
-                segments.as_ptr(),
-                total_len as u32,
-                std::ptr::null_mut(),
-                &mut overlapped,
-            )
-        };
-
-        if result == 0 {
-            return Err(io::Error::last_os_error());
-        }
-
-        let mut bytes_written: u32 = 0;
-        let overlapped_result =
-            unsafe { GetOverlappedResult(raw_handle, &overlapped, &mut bytes_written, 1) };
-
-        if overlapped_result == 0 {
-            return Err(io::Error::last_os_error());
-        }
-
-        Ok(bytes_written as usize)
+        write_vectored_handler(self, bufs, None)
     }
 
     #[cfg(not(feature = "direct-io"))]
@@ -278,66 +288,7 @@ impl VectoredExt for File {
     }
 
     fn write_vectored_at(&self, bufs: &[io::IoSlice<'_>], offset: u64) -> io::Result<usize> {
-        let bufs_len = bufs.len();
-        let mut segments: Vec<FILE_SEGMENT_ELEMENT> = Vec::with_capacity(bufs_len + 1);
-        let mut tmp_bufs = Vec::with_capacity(bufs_len);
-        let mut total_len = 0;
-
-        for buf in bufs.iter() {
-            let buf_addr = buf.as_ptr() as usize;
-            let buf_len = buf.len();
-
-            if !buf_len.is_multiple_of(ALIGN) {
-                return Err(LENGTH_NON_ALIGNED_ERROR);
-            }
-
-            if buf_addr.is_multiple_of(ALIGN) {
-                segments.push(FILE_SEGMENT_ELEMENT {
-                    Buffer: buf.as_ptr() as *mut _,
-                });
-                tmp_bufs.push(None);
-            } else {
-                let mut tmp_buf = avec!(buf_len);
-                tmp_buf[..buf_len].copy_from_slice(buf);
-                segments.push(FILE_SEGMENT_ELEMENT {
-                    Buffer: tmp_buf.as_mut_ptr() as *mut _,
-                });
-                tmp_bufs.push(Some(tmp_buf));
-            }
-
-            total_len += buf_len;
-        }
-
-        segments.push(unsafe { std::mem::zeroed() });
-
-        let mut overlapped: OVERLAPPED = unsafe { std::mem::zeroed() };
-        overlapped.Anonymous.Anonymous.Offset = (offset & 0xFFFFFFFF) as u32;
-        overlapped.Anonymous.Anonymous.OffsetHigh = (offset >> 32) as u32;
-        let raw_handle: HANDLE = self.inner.as_raw_handle() as _;
-
-        let result = unsafe {
-            WriteFileGather(
-                raw_handle,
-                segments.as_ptr(),
-                total_len as u32,
-                std::ptr::null_mut(),
-                &mut overlapped,
-            )
-        };
-
-        if result == 0 {
-            return Err(io::Error::last_os_error());
-        }
-
-        let mut bytes_written: u32 = 0;
-        let overlapped_result =
-            unsafe { GetOverlappedResult(raw_handle, &overlapped, &mut bytes_written, 1) };
-
-        if overlapped_result == 0 {
-            return Err(io::Error::last_os_error());
-        }
-
-        Ok(bytes_written as usize)
+        write_vectored_handler(self, bufs, Some(offset))
     }
 }
 
