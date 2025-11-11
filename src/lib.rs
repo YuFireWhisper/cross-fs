@@ -1,13 +1,10 @@
 #![feature(can_vector, io_const_error)]
 #![cfg_attr(target_family = "unix", feature(unix_file_vectored_at))]
 
-#[cfg(feature = "direct-io")]
 use std::io;
 
-mod file;
 mod open_options;
 
-pub use file::*;
 pub use open_options::OpenOptions;
 
 #[cfg(feature = "align-512")]
@@ -15,12 +12,6 @@ pub const ALIGN: usize = 512;
 
 #[cfg(not(feature = "align-512"))]
 pub const ALIGN: usize = 4096;
-
-#[cfg(feature = "direct-io")]
-const LENGTH_NON_ALIGNED_ERROR: io::Error = io::const_error!(
-    io::ErrorKind::InvalidInput,
-    "Buffer length must be a multiple of ALIGN"
-);
 
 #[macro_export]
 macro_rules! avec {
@@ -34,211 +25,234 @@ macro_rules! avec {
     }};
 }
 
+pub trait PositionedExt {
+    fn read_at(&self, buf: &mut [u8], offset: u64) -> io::Result<usize>;
+    fn write_at(&self, buf: &[u8], offset: u64) -> io::Result<usize>;
+    fn write_all_at(&self, mut buf: &[u8], mut offset: u64) -> io::Result<()> {
+        while !buf.is_empty() {
+            match self.write_at(buf, offset) {
+                Ok(0) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::WriteZero,
+                        "failed to write whole buffer",
+                    ));
+                }
+                Ok(n) => {
+                    buf = &buf[n..];
+                    offset += n as u64;
+                }
+                Err(ref e) if e.kind() == io::ErrorKind::Interrupted => {}
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(())
+    }
+}
+
+pub trait VectoredExt {
+    fn read_vectored(&self, bufs: &mut [io::IoSliceMut<'_>]) -> io::Result<usize>;
+    fn read_vectored_at(&self, bufs: &mut [io::IoSliceMut<'_>], offset: u64) -> io::Result<usize>;
+    fn write_vectored(&self, bufs: &[io::IoSlice<'_>]) -> io::Result<usize>;
+    fn write_vectored_at(&self, bufs: &[io::IoSlice<'_>], offset: u64) -> io::Result<usize>;
+}
+
+#[cfg(unix)]
+impl PositionedExt for std::fs::File {
+    fn read_at(&self, buf: &mut [u8], offset: u64) -> io::Result<usize> {
+        std::os::unix::fs::FileExt::read_at(self, buf, offset)
+    }
+
+    fn write_at(&self, buf: &[u8], offset: u64) -> io::Result<usize> {
+        std::os::unix::fs::FileExt::write_at(self, buf, offset)
+    }
+
+    fn write_all_at(&self, buf: &[u8], offset: u64) -> io::Result<()> {
+        std::os::unix::fs::FileExt::write_all_at(self, buf, offset)
+    }
+}
+
+#[cfg(unix)]
+impl VectoredExt for std::fs::File {
+    fn read_vectored(&self, bufs: &mut [io::IoSliceMut<'_>]) -> io::Result<usize> {
+        self.read_vectored(bufs)
+    }
+
+    fn read_vectored_at(&self, bufs: &mut [io::IoSliceMut<'_>], offset: u64) -> io::Result<usize> {
+        std::os::unix::fs::FileExt::read_vectored_at(self, bufs, offset)
+    }
+
+    fn write_vectored(&self, bufs: &[io::IoSlice<'_>]) -> io::Result<usize> {
+        self.write_vectored(bufs)
+    }
+
+    fn write_vectored_at(&self, bufs: &[io::IoSlice<'_>], offset: u64) -> io::Result<usize> {
+        std::os::unix::fs::FileExt::write_vectored_at(self, bufs, offset)
+    }
+}
+
+#[cfg(target_os = "windows")]
+impl PositionedExt for std::fs::File {
+    fn read_at(&self, buf: &mut [u8], offset: u64) -> io::Result<usize> {
+        std::os::windows::fs::FileExt::seek_read(self, buf, offset)
+    }
+
+    fn write_at(&self, buf: &[u8], offset: u64) -> io::Result<usize> {
+        std::os::windows::fs::FileExt::seek_write(self, buf, offset)
+    }
+}
+
+#[cfg(target_os = "windows")]
+impl VectoredExt for std::fs::File {
+    fn read_vectored(&self, bufs: &mut [io::IoSliceMut<'_>]) -> io::Result<usize> {
+        windows_read_vectored_handler(self, bufs, None)
+    }
+
+    fn read_vectored_at(&self, bufs: &mut [io::IoSliceMut<'_>], offset: u64) -> io::Result<usize> {
+        windows_read_vectored_handler(self, bufs, Some(offset))
+    }
+
+    fn write_vectored(&self, bufs: &[io::IoSlice<'_>]) -> io::Result<usize> {
+        windows_write_vectored_handler(self, bufs, None)
+    }
+
+    fn write_vectored_at(&self, bufs: &[io::IoSlice<'_>], offset: u64) -> io::Result<usize> {
+        windows_write_vectored_handler(self, bufs, Some(offset))
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn windows_read_vectored_handler(
+    file: &std::fs::File,
+    bufs: &mut [io::IoSliceMut<'_>],
+    offset: Option<u64>,
+) -> io::Result<usize> {
+    use windows_sys::Win32::Storage::FileSystem::FILE_SEGMENT_ELEMENT;
+
+    let mut segments = Vec::with_capacity(bufs.len() + 1);
+    let mut total_len = 0;
+
+    for buf in bufs.iter_mut() {
+        segments.push(FILE_SEGMENT_ELEMENT {
+            Buffer: buf.as_mut_ptr() as *mut _,
+        });
+        total_len += buf.len();
+    }
+    segments.push(unsafe { std::mem::zeroed() });
+
+    windows_vectored_handler_inner(file, &segments, total_len, offset, true)
+}
+
+#[cfg(target_os = "windows")]
+fn windows_vectored_handler_inner(
+    file: &std::fs::File,
+    segments: &[windows_sys::Win32::Storage::FileSystem::FILE_SEGMENT_ELEMENT],
+    total_len: usize,
+    offset: Option<u64>,
+    is_read: bool,
+) -> io::Result<usize> {
+    use std::os::windows::{io::AsRawHandle, raw::HANDLE};
+
+    use windows_sys::Win32::{
+        Storage::FileSystem::{ReadFileScatter, WriteFileGather},
+        System::IO::{GetOverlappedResult, OVERLAPPED},
+    };
+
+    let raw_handle: HANDLE = file.as_raw_handle() as _;
+    let mut overlapped: OVERLAPPED = unsafe { std::mem::zeroed() };
+    if let Some(off) = offset {
+        overlapped.Anonymous.Anonymous.Offset = (off & 0xFFFFFFFF) as u32;
+        overlapped.Anonymous.Anonymous.OffsetHigh = (off >> 32) as u32;
+    }
+
+    let result = if is_read {
+        unsafe {
+            ReadFileScatter(
+                raw_handle,
+                segments.as_ptr(),
+                total_len as u32,
+                std::ptr::null_mut(),
+                &mut overlapped,
+            )
+        }
+    } else {
+        unsafe {
+            WriteFileGather(
+                raw_handle,
+                segments.as_ptr(),
+                total_len as u32,
+                std::ptr::null_mut(),
+                &mut overlapped,
+            )
+        }
+    };
+
+    if result == 0 {
+        return Err(io::Error::last_os_error());
+    }
+
+    let mut n: u32 = 0;
+
+    if unsafe { GetOverlappedResult(raw_handle, &overlapped, &mut n, 1) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+
+    Ok(n as usize)
+}
+
+#[cfg(target_os = "windows")]
+fn windows_write_vectored_handler(
+    file: &std::fs::File,
+    bufs: &[io::IoSlice<'_>],
+    offset: Option<u64>,
+) -> io::Result<usize> {
+    use windows_sys::Win32::Storage::FileSystem::FILE_SEGMENT_ELEMENT;
+
+    let mut segments = Vec::with_capacity(bufs.len() + 1);
+    let mut total_len = 0;
+
+    for buf in bufs.iter() {
+        segments.push(FILE_SEGMENT_ELEMENT {
+            Buffer: buf.as_ptr() as *mut _,
+        });
+        total_len += buf.len();
+    }
+    segments.push(unsafe { std::mem::zeroed() });
+
+    windows_vectored_handler_inner(file, &segments, total_len, offset, false)
+}
+
 #[cfg(test)]
 mod tests {
-    use std::io::{Read, Seek, SeekFrom, Write};
-
-    use tempfile::tempdir;
+    use std::io::Write;
 
     use super::*;
 
     const FILE_NAME: &str = "testfile";
-    const FILE_SIZE: usize = ALIGN * 2;
-
-    #[cfg(feature = "direct-io")]
-    const DIO_BUFFER_SIZE: usize = ALIGN;
+    const TEST_DIRECT_IO_DATA: [u8; ALIGN * 2] = [5; ALIGN * 2];
 
     #[test]
-    fn basic_read_write() {
-        let dir = tempdir().unwrap();
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    fn direct_io() {
+        let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join(FILE_NAME);
 
-        let mut file = File::options()
+        let mut file = OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
+            .direct_io(true)
             .open(&file_path)
-            .expect("Failed to create test file");
+            .unwrap();
 
-        let data = vec![1u8; FILE_SIZE];
+        let mut buf = avec!(ALIGN * 2);
+        buf.copy_from_slice(&TEST_DIRECT_IO_DATA);
 
-        file.write_all(&data).expect("Failed to write to test file");
-        file.seek(SeekFrom::Start(0))
-            .expect("Failed to seek to start of test file");
+        let n = file.write(&buf).unwrap();
+        assert_eq!(n, ALIGN * 2);
 
-        let mut buf = vec![0u8; FILE_SIZE];
-        let n = file.read(&mut buf).expect("Failed to read from test file");
-
-        assert_eq!(n, FILE_SIZE);
-        assert_eq!(buf, data);
-    }
-
-    #[test]
-    #[cfg(feature = "direct-io")]
-    fn direct_io_read_write() {
-        let dir = tempdir().unwrap();
-        let file_path = dir.path().join(FILE_NAME);
-
-        let mut file = File::options()
-            .read(true)
-            .write(true)
-            .create(true)
-            .direct_io(DIO_BUFFER_SIZE)
-            .open(&file_path)
-            .expect("Failed to create test file with direct I/O");
-
-        let data = vec![1u8; FILE_SIZE];
-
-        file.write_all(&data)
-            .expect("Failed to write to test file with direct I/O");
-        file.seek(SeekFrom::Start(0))
-            .expect("Failed to seek to start of test file with direct I/O");
-
-        let mut buf = vec![0u8; FILE_SIZE];
-        let n = file
-            .read(&mut buf)
-            .expect("Failed to read from test file with direct I/O");
-
-        assert_eq!(n, FILE_SIZE);
-        assert_eq!(buf, data);
-    }
-
-    #[test]
-    #[cfg(feature = "direct-io")]
-    fn read_lager_than_buffer_data() {
-        let dir = tempdir().unwrap();
-        let file_path = dir.path().join(FILE_NAME);
-
-        let mut file = File::options()
-            .read(true)
-            .write(true)
-            .create(true)
-            .direct_io(DIO_BUFFER_SIZE / 2)
-            .open(&file_path)
-            .expect("Failed to create test file with direct I/O");
-
-        let data = vec![1u8; DIO_BUFFER_SIZE];
-
-        file.write_all(&data)
-            .expect("Failed to write to test file with direct I/O");
-        file.seek(SeekFrom::Start(0))
-            .expect("Failed to seek to start of test file with direct I/O");
-
-        let mut buf = vec![0u8; DIO_BUFFER_SIZE];
-        let n = file
-            .read(&mut buf)
-            .expect("Failed to read from test file with direct I/O");
-
-        assert_eq!(n, DIO_BUFFER_SIZE);
-        assert_eq!(buf, data);
-    }
-
-    #[test]
-    #[cfg(all(target_os = "linux", not(feature = "direct-io")))]
-    fn read_vectored() {
-        use std::io::IoSliceMut;
-
-        let dir = tempdir().unwrap();
-        let file_path = dir.path().join(FILE_NAME);
-
-        let mut file = File::options()
-            .read(true)
-            .write(true)
-            .create(true)
-            .open(&file_path)
-            .expect("Failed to create test file");
-
-        let mut data = vec![1u8; FILE_SIZE];
-        data[FILE_SIZE / 4] = 2;
-        data[FILE_SIZE / 2 + 3] = 3;
-        data[FILE_SIZE - 1] = 4;
-
-        file.write_all(&data).expect("Failed to write to test file");
-        file.seek(SeekFrom::Start(0))
-            .expect("Failed to seek to start of test file");
-
-        let mut buf1 = vec![0u8; FILE_SIZE / 4];
-        let mut buf2 = vec![0u8; FILE_SIZE / 4];
-        let mut buf3 = vec![0u8; FILE_SIZE / 2];
-
-        let mut bufs = [
-            IoSliceMut::new(&mut buf1),
-            IoSliceMut::new(&mut buf2),
-            IoSliceMut::new(&mut buf3),
-        ];
-
-        let n = file
-            .read_vectored(&mut bufs)
-            .expect("Failed to read from test file");
-
-        assert_eq!(n, FILE_SIZE);
-        assert_eq!(&buf1, &data[..FILE_SIZE / 4]);
-        assert_eq!(&buf2, &data[FILE_SIZE / 4..FILE_SIZE / 2]);
-        assert_eq!(&buf3, &data[FILE_SIZE / 2..]);
-    }
-
-    #[test]
-    #[cfg(all(target_os = "linux", feature = "direct-io"))]
-    fn direct_io_read_vectored() {
-        use std::io::IoSliceMut;
-
-        let dir = tempdir().unwrap();
-        let file_path = dir.path().join(FILE_NAME);
-
-        let mut file = File::options()
-            .read(true)
-            .write(true)
-            .create(true)
-            .direct_io(DIO_BUFFER_SIZE)
-            .open(&file_path)
-            .expect("Failed to create test file with direct I/O");
-
-        let mut data = vec![1u8; FILE_SIZE];
-        data[1] = 2;
-        data[FILE_SIZE - 1] = 3;
-
-        file.write_all(&data)
-            .expect("Failed to write to test file with direct I/O");
-        file.seek(SeekFrom::Start(0))
-            .expect("Failed to seek to start of test file with direct I/O");
-
-        let mut unalign_buf = loop {
-            let buf = vec![0u8; FILE_SIZE / 2];
-            if !(buf.as_ptr() as usize).is_multiple_of(ALIGN) {
-                break buf;
-            }
-        };
-        let mut align_buf = avec!(FILE_SIZE / 2);
-        let mut bufs = [
-            IoSliceMut::new(&mut unalign_buf),
-            IoSliceMut::new(&mut align_buf),
-        ];
-
-        {
-            if cfg!(target_os = "linux") {
-                println!("Running on Linux");
-            }
-
-            if cfg!(feature = "direct-io") {
-                println!("Direct I/O feature is enabled");
-            }
-        }
-
-        let n = file
-            .read_vectored(&mut bufs)
-            .expect("Failed to read from test file with direct I/O");
-
-        dbg!(n);
-
-        file.seek(SeekFrom::Start(0))
-            .expect("Failed to seek to start of test file with direct I/O");
-        let mut tmp = avec!(FILE_SIZE);
-        file.read_exact(&mut tmp)
-            .expect("Failed to read from test file with direct I/O");
-        assert_eq!(&tmp, &data);
-
-        assert_eq!(n, FILE_SIZE);
-        assert_eq!(&unalign_buf, &data[..FILE_SIZE / 2]);
-        assert_eq!(&align_buf, &data[FILE_SIZE / 2..]);
+        let mut read_buf = avec!(ALIGN * 2);
+        let n = file.read_at(&mut read_buf, 0).unwrap();
+        assert_eq!(n, ALIGN * 2);
+        assert_eq!(read_buf, buf);
     }
 }

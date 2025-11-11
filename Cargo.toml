@@ -6,10 +6,8 @@ description = "A cross-platform filesystem"
 
 [features]
 align-512 = []
-direct-io = []
 
 [dependencies]
-parking_lot = "0.12"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

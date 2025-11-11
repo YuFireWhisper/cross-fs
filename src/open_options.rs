@@ -1,6 +1,4 @@
-use std::{io, path::Path};
-
-use crate::File;
+use std::{fs::File, io, path::Path};
 
 #[derive(Clone)]
 #[derive(Debug)]
@@ -78,9 +76,6 @@ impl OpenOptions {
             }
         }
 
-        Ok(File {
-            inner: opts.open(path)?,
-            enable_direct_io: self.direct_io,
-        })
+        opts.open(path)
     }
 }
