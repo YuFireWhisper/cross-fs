@@ -1,4 +1,5 @@
 use std::{
+    fmt::Debug,
     fs::FileTimes,
     io::{self, Seek},
     path::Path,
@@ -208,6 +209,12 @@ impl File {
         F: Fn(&std::fs::File, &[u8], u64) -> io::Result<R>,
     {
         f(&self.inner, buf, offset)
+    }
+}
+
+impl Debug for File {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.inner.fmt(f)
     }
 }
 
