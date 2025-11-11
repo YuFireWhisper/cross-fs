@@ -62,7 +62,7 @@ fn read_vectored_handler(
     }
     let raw_handle: HANDLE = file.inner.as_raw_handle() as _;
 
-    let result = unsafe {
+    if unsafe {
         ReadFileScatter(
             raw_handle,
             segments.as_ptr(),
@@ -70,24 +70,22 @@ fn read_vectored_handler(
             std::ptr::null_mut(),
             &mut overlapped,
         )
-    };
-
-    if result == 0 {
+    } == 0
+    {
         return Err(io::Error::last_os_error());
     }
 
-    let mut read: u32 = 0;
-    let overlapped_result = unsafe { GetOverlappedResult(raw_handle, &overlapped, &mut read, 1) };
+    let mut bytes_read: u32 = 0;
 
-    if overlapped_result == 0 {
+    if unsafe { GetOverlappedResult(raw_handle, &overlapped, &mut bytes_read, 1) } == 0 {
         return Err(io::Error::last_os_error());
     }
-    if read == 0 {
+    if bytes_read == 0 {
         return Ok(0);
     }
 
-    let read = read as usize;
-    let mut remaining = read;
+    let bytes_read = bytes_read as usize;
+    let mut remaining = bytes_read;
 
     for (buf, tmp_buf) in bufs.iter_mut().zip(tmp_bufs) {
         let buf_len = buf.len();
@@ -104,7 +102,7 @@ fn read_vectored_handler(
         }
     }
 
-    Ok(read)
+    Ok(bytes_read)
 }
 
 impl Read for &File {
