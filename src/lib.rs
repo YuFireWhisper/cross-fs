@@ -1,5 +1,33 @@
 #![feature(can_vector, io_const_error)]
 #![cfg_attr(target_family = "unix", feature(unix_file_vectored_at))]
+//! ## Examples
+//!
+//! ```rust
+//! use std::io::Write;
+//! use cross_fs::{OpenOptions, avec, PositionedExt};
+//!
+//! let dir = tempfile::tempdir().unwrap();
+//! let file_path = dir.path().join("direct_io_file.dat");
+//! let mut data = avec!(cross_fs::ALIGN);
+//! data[..13].copy_from_slice(b"Hello, World!");
+//!
+//! let mut file = OpenOptions::new()
+//!     .read(true)
+//!     .write(true)
+//!     .create(true)
+//!     .direct_io(true)
+//!     .open(&file_path)
+//!     .unwrap();
+//!
+//! file.write_all(&data).unwrap();
+//! file.read_at(&mut data, 0).unwrap();
+//!
+//! assert_eq!(&data[..13], b"Hello, World!");
+//! ```
+//!
+//! ## Warning
+//! ### Windows Vectored I/O
+//! To use VectoredExt related APIs on Windows, you **must** enable Direct I/O (via `OpenOptions::direct_io(true)`). This stems from Windows filesystem limitations. Linux is not subject to this restriction.
 
 use std::io;
 
