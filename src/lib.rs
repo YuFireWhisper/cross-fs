@@ -1,6 +1,9 @@
 #![feature(can_vector, io_const_error)]
 #![cfg_attr(target_family = "unix", feature(unix_file_vectored_at))]
 
+#[cfg(feature = "direct-io")]
+use std::io;
+
 mod file;
 mod open_options;
 
@@ -12,6 +15,12 @@ pub const ALIGN: usize = 512;
 
 #[cfg(not(feature = "align-512"))]
 pub const ALIGN: usize = 4096;
+
+#[cfg(feature = "direct-io")]
+const LENGTH_NON_ALIGNED_ERROR: io::Error = io::const_error!(
+    io::ErrorKind::InvalidInput,
+    "Buffer length must be a multiple of ALIGN"
+);
 
 #[macro_export]
 macro_rules! avec {

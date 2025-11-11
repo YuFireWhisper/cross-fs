@@ -11,19 +11,9 @@ use windows_sys::Win32::{
     System::IO::{GetOverlappedResult, OVERLAPPED},
 };
 
-use crate::{
-    File,
-    file::PositionedExt,
-    file::impls::{read_helper, write_helper},
-};
 #[cfg(feature = "direct-io")]
-use crate::{
-    avec,
-    file::{
-        VectoredExt,
-        impls::{ALIGN, LENGTH_NON_ALIGNED_ERROR},
-    },
-};
+use crate::{ALIGN, LENGTH_NON_ALIGNED_ERROR, avec, file::VectoredExt};
+use crate::{File, file::PositionedExt};
 
 #[cfg(feature = "direct-io")]
 fn read_vectored_handler(
@@ -178,7 +168,7 @@ fn write_vectored_handler(
 
 impl Read for &File {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        read_helper(self, buf, (), |mut f, b, _| f.read(b))
+        self.read_helper(buf, 0, |mut f, b, _| f.read(b))
     }
 
     #[cfg(feature = "direct-io")]
@@ -219,7 +209,7 @@ impl Read for File {
 
 impl Write for &File {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        write_helper(self, buf, (), |mut f, b, _| f.write(b))
+        self.write_helper(buf, 0, |mut f, b, _| f.write(b))
     }
 
     #[cfg(feature = "direct-io")]
@@ -264,11 +254,11 @@ impl Write for File {
 
 impl PositionedExt for File {
     fn read_at(&self, buf: &mut [u8], offset: u64) -> io::Result<usize> {
-        read_helper(self, buf, offset, |f, b, o| f.seek_read(b, o))
+        self.read_helper(buf, offset, |f, b, o| f.seek_read(b, o))
     }
 
     fn write_at(&self, buf: &[u8], offset: u64) -> io::Result<usize> {
-        write_helper(self, buf, offset, |f, b, o| f.seek_write(b, o))
+        self.write_helper(buf, offset, |f, b, o| f.seek_write(b, o))
     }
 }
 

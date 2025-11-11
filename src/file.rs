@@ -10,6 +10,8 @@ use std::{
 use parking_lot::RwLock;
 
 use crate::open_options::OpenOptions;
+#[cfg(feature = "direct-io")]
+use crate::{ALIGN, LENGTH_NON_ALIGNED_ERROR, avec};
 
 pub mod impls;
 
@@ -128,6 +130,84 @@ impl File {
 
     pub fn as_std(&self) -> &std::fs::File {
         &self.inner
+    }
+
+    #[cfg(feature = "direct-io")]
+    pub(crate) fn read_helper<F>(&self, buf: &mut [u8], offset: u64, f: F) -> io::Result<usize>
+    where
+        F: Fn(&std::fs::File, &mut [u8], u64) -> io::Result<usize>,
+    {
+        let buf_ptr = buf.as_ptr() as usize;
+        let buf_len = buf.len();
+        let aligned_len = buf_len.next_multiple_of(ALIGN);
+
+        // If direct I/O is disabled or the buffer is already aligned,
+        // use it directly.
+        if self.direct_io_buffer_size == 0
+            || (buf_ptr.is_multiple_of(ALIGN) && buf_len == aligned_len)
+        {
+            return f(&self.inner, buf, offset);
+        }
+
+        if aligned_len > self.direct_io_buffer_size {
+            let mut dbuf = avec!(aligned_len);
+            let n = f(&self.inner, &mut dbuf, offset)?.min(buf_len);
+            buf[..n].copy_from_slice(&dbuf[..n]);
+            Ok(n)
+        } else {
+            let mut dbuf = self.direct_io_buffer.write();
+            let n = f(&self.inner, &mut dbuf[..aligned_len], offset)?.min(buf_len);
+            buf[..n].copy_from_slice(&dbuf[..n]);
+            Ok(n)
+        }
+    }
+
+    #[cfg(not(feature = "direct-io"))]
+    fn read_helper<F>(&self, buf: &mut [u8], offset: u64, f: F) -> io::Result<usize>
+    where
+        F: Fn(&std::fs::File, &mut [u8], u64) -> io::Result<usize>,
+    {
+        f(&self.inner, buf, offset)
+    }
+
+    #[cfg(feature = "direct-io")]
+    fn write_helper<F, R>(&self, buf: &[u8], offset: u64, f: F) -> io::Result<R>
+    where
+        F: Fn(&std::fs::File, &[u8], u64) -> io::Result<R>,
+    {
+        if self.direct_io_buffer_size == 0 {
+            return f(&self.inner, buf, offset);
+        }
+
+        let buf_ptr = buf.as_ptr() as usize;
+        let buf_len = buf.len();
+
+        if !buf_len.is_multiple_of(ALIGN) {
+            return Err(LENGTH_NON_ALIGNED_ERROR);
+        }
+
+        // Already aligned
+        if buf_ptr.is_multiple_of(ALIGN) {
+            return f(&self.inner, buf, offset);
+        }
+
+        if buf_len > self.direct_io_buffer_size {
+            let mut dbuf = avec!(buf_len);
+            dbuf[..buf_len].copy_from_slice(buf);
+            f(&self.inner, &dbuf[..buf_len], offset)
+        } else {
+            let mut dbuf = self.direct_io_buffer.write();
+            dbuf[..buf_len].copy_from_slice(buf);
+            f(&self.inner, &dbuf[..buf_len], offset)
+        }
+    }
+
+    #[cfg(not(feature = "direct-io"))]
+    fn write_helper<F, R>(&self, buf: &[u8], offset: u64, f: F) -> io::Result<R>
+    where
+        F: Fn(&std::fs::File, &[u8], u64) -> io::Result<R>,
+    {
+        f(&self.inner, buf, offset)
     }
 }
 

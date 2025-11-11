@@ -6,12 +6,8 @@ use std::{
 };
 
 #[cfg(feature = "direct-io")]
-use crate::{ALIGN, avec, file::impls::LENGTH_NON_ALIGNED_ERROR};
-use crate::{
-    File,
-    file::impls::{read_helper, write_helper},
-    file::{PositionedExt, VectoredExt},
-};
+use crate::{ALIGN, LENGTH_NON_ALIGNED_ERROR, avec};
+use crate::{File, PositionedExt, VectoredExt};
 
 #[cfg(feature = "direct-io")]
 fn read_vectored_handler<F>(
@@ -130,7 +126,7 @@ where
 
 impl Read for &File {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        read_helper(self, buf, (), |mut f, b, _| f.read(b))
+        self.read_helper(buf, 0, |mut f, b, _| f.read(b))
     }
 
     #[cfg(feature = "direct-io")]
@@ -173,7 +169,7 @@ impl Read for File {
 
 impl Write for &File {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        write_helper(self, buf, (), |mut f, b, _| f.write(b))
+        self.write_helper(buf, 0, |mut f, b, _| f.write(b))
     }
 
     #[cfg(feature = "direct-io")]
@@ -224,11 +220,11 @@ impl Write for File {
 
 impl PositionedExt for File {
     fn read_at(&self, buf: &mut [u8], offset: u64) -> io::Result<usize> {
-        read_helper(self, buf, offset, |f, b, o| f.read_at(b, o))
+        self.read_helper(buf, offset, |f, b, o| f.read_at(b, o))
     }
 
     fn write_at(&self, buf: &[u8], offset: u64) -> io::Result<usize> {
-        write_helper(self, buf, offset, |f, b, o| f.write_at(b, o))
+        self.write_helper(buf, offset, |f, b, o| f.write_at(b, o))
     }
 }
 
