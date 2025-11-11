@@ -21,6 +21,92 @@ use crate::{
     },
 };
 
+#[cfg(feature = "direct-io")]
+fn read_vectored_handler(
+    file: &File,
+    bufs: &mut [io::IoSliceMut<'_>],
+    offset: Option<u64>,
+) -> io::Result<usize> {
+    let bufs_len = bufs.len();
+    let mut segments = Vec::with_capacity(bufs_len + 1);
+    let mut tmp_bufs = Vec::with_capacity(bufs_len);
+    let mut total_len = 0;
+
+    for buf in bufs.iter_mut() {
+        let buf_addr = buf.as_mut_ptr() as usize;
+        let buf_len = buf.len();
+        let aligned_len = buf_len.next_multiple_of(ALIGN);
+
+        if buf_addr.is_multiple_of(ALIGN) && buf_len == aligned_len {
+            segments.push(FILE_SEGMENT_ELEMENT {
+                Buffer: buf.as_mut_ptr() as *mut _,
+            });
+            tmp_bufs.push(None);
+        } else {
+            let mut tmp_buf = avec!(aligned_len);
+            segments.push(FILE_SEGMENT_ELEMENT {
+                Buffer: tmp_buf.as_mut_ptr() as *mut _,
+            });
+            tmp_bufs.push(Some(tmp_buf));
+        }
+
+        total_len += aligned_len;
+    }
+
+    segments.push(unsafe { std::mem::zeroed() });
+
+    let mut overlapped: OVERLAPPED = unsafe { std::mem::zeroed() };
+    if let Some(off) = offset {
+        overlapped.Anonymous.Anonymous.Offset = (off & 0xFFFFFFFF) as u32;
+        overlapped.Anonymous.Anonymous.OffsetHigh = (off >> 32) as u32;
+    }
+    let raw_handle: HANDLE = file.inner.as_raw_handle() as _;
+
+    let result = unsafe {
+        ReadFileScatter(
+            raw_handle,
+            segments.as_ptr(),
+            total_len as u32,
+            std::ptr::null_mut(),
+            &mut overlapped,
+        )
+    };
+
+    if result == 0 {
+        return Err(io::Error::last_os_error());
+    }
+
+    let mut read: u32 = 0;
+    let overlapped_result = unsafe { GetOverlappedResult(raw_handle, &overlapped, &mut read, 1) };
+
+    if overlapped_result == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    if read == 0 {
+        return Ok(0);
+    }
+
+    let read = read as usize;
+    let mut remaining = read;
+
+    for (buf, tmp_buf) in bufs.iter_mut().zip(tmp_bufs) {
+        let buf_len = buf.len();
+        let wrote = remaining.min(buf_len);
+
+        if let Some(tmp_buf) = tmp_buf {
+            buf[..wrote].copy_from_slice(&tmp_buf[..wrote]);
+        }
+
+        remaining -= wrote;
+
+        if remaining == 0 {
+            break;
+        }
+    }
+
+    Ok(read)
+}
+
 impl Read for &File {
     #[cfg(feature = "direct-io")]
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
@@ -34,81 +120,7 @@ impl Read for &File {
 
     #[cfg(feature = "direct-io")]
     fn read_vectored(&mut self, bufs: &mut [std::io::IoSliceMut<'_>]) -> io::Result<usize> {
-        let bufs_len = bufs.len();
-        let mut segments: Vec<FILE_SEGMENT_ELEMENT> = Vec::with_capacity(bufs_len + 1);
-        let mut tmp_bufs = Vec::with_capacity(bufs_len);
-        let mut total_len = 0;
-
-        for buf in bufs.iter_mut() {
-            let buf_addr = buf.as_mut_ptr() as usize;
-            let buf_len = buf.len();
-            let aligned_len = buf_len.next_multiple_of(ALIGN);
-
-            if buf_addr.is_multiple_of(ALIGN) && buf_len == aligned_len {
-                segments.push(FILE_SEGMENT_ELEMENT {
-                    Buffer: buf.as_mut_ptr() as *mut _,
-                });
-                tmp_bufs.push(None);
-            } else {
-                let mut tmp_buf = avec!(aligned_len);
-                segments.push(FILE_SEGMENT_ELEMENT {
-                    Buffer: tmp_buf.as_mut_ptr() as *mut _,
-                });
-                tmp_bufs.push(Some(tmp_buf));
-            }
-
-            total_len += aligned_len;
-        }
-
-        segments.push(unsafe { std::mem::zeroed() });
-
-        let mut overlapped: OVERLAPPED = unsafe { std::mem::zeroed() };
-        let raw_handle: HANDLE = self.inner.as_raw_handle() as _;
-
-        let result = unsafe {
-            ReadFileScatter(
-                raw_handle,
-                segments.as_ptr(),
-                total_len as u32,
-                std::ptr::null_mut(),
-                &mut overlapped,
-            )
-        };
-
-        if result == 0 {
-            return Err(io::Error::last_os_error());
-        }
-
-        let mut bytes_read: u32 = 0;
-        let overlapped_result =
-            unsafe { GetOverlappedResult(raw_handle, &overlapped, &mut bytes_read, 1) };
-
-        if overlapped_result == 0 {
-            return Err(io::Error::last_os_error());
-        }
-
-        if bytes_read == 0 {
-            return Ok(0);
-        }
-
-        let mut remaining = bytes_read as usize;
-
-        for (buf, tmp_buf) in bufs.iter_mut().zip(tmp_bufs) {
-            let buf_len = buf.len();
-            let wrote = remaining.min(buf_len);
-
-            if let Some(tmp_buf) = tmp_buf {
-                buf[..wrote].copy_from_slice(&tmp_buf[..wrote]);
-            }
-
-            remaining -= wrote;
-
-            if remaining == 0 {
-                break;
-            }
-        }
-
-        Ok(bytes_read as usize)
+        read_vectored_handler(self, bufs, None)
     }
 
     #[cfg(not(feature = "direct-io"))]
@@ -264,83 +276,7 @@ impl PositionedExt for File {
 #[cfg(feature = "direct-io")]
 impl VectoredExt for File {
     fn read_vectored_at(&self, bufs: &mut [io::IoSliceMut<'_>], offset: u64) -> io::Result<usize> {
-        let bufs_len = bufs.len();
-        let mut segments: Vec<FILE_SEGMENT_ELEMENT> = Vec::with_capacity(bufs_len + 1);
-        let mut tmp_bufs = Vec::with_capacity(bufs_len);
-        let mut total_len = 0;
-
-        for buf in bufs.iter_mut() {
-            let buf_addr = buf.as_mut_ptr() as usize;
-            let buf_len = buf.len();
-            let aligned_len = buf_len.next_multiple_of(ALIGN);
-
-            if buf_addr.is_multiple_of(ALIGN) && buf_len == aligned_len {
-                segments.push(FILE_SEGMENT_ELEMENT {
-                    Buffer: buf.as_mut_ptr() as *mut _,
-                });
-                tmp_bufs.push(None);
-            } else {
-                let mut tmp_buf = avec!(aligned_len);
-                segments.push(FILE_SEGMENT_ELEMENT {
-                    Buffer: tmp_buf.as_mut_ptr() as *mut _,
-                });
-                tmp_bufs.push(Some(tmp_buf));
-            }
-
-            total_len += aligned_len;
-        }
-
-        segments.push(unsafe { std::mem::zeroed() });
-
-        let mut overlapped: OVERLAPPED = unsafe { std::mem::zeroed() };
-        overlapped.Anonymous.Anonymous.Offset = (offset & 0xFFFFFFFF) as u32;
-        overlapped.Anonymous.Anonymous.OffsetHigh = (offset >> 32) as u32;
-        let raw_handle: HANDLE = self.inner.as_raw_handle() as _;
-
-        let result = unsafe {
-            ReadFileScatter(
-                raw_handle,
-                segments.as_ptr(),
-                total_len as u32,
-                std::ptr::null_mut(),
-                &mut overlapped,
-            )
-        };
-
-        if result == 0 {
-            return Err(io::Error::last_os_error());
-        }
-
-        let mut bytes_read: u32 = 0;
-        let overlapped_result =
-            unsafe { GetOverlappedResult(raw_handle, &overlapped, &mut bytes_read, 1) };
-
-        if overlapped_result == 0 {
-            return Err(io::Error::last_os_error());
-        }
-
-        if bytes_read == 0 {
-            return Ok(0);
-        }
-
-        let mut remaining = bytes_read as usize;
-
-        for (buf, tmp_buf) in bufs.iter_mut().zip(tmp_bufs) {
-            let buf_len = buf.len();
-            let wrote = remaining.min(buf_len);
-
-            if let Some(tmp_buf) = tmp_buf {
-                buf[..wrote].copy_from_slice(&tmp_buf[..wrote]);
-            }
-
-            remaining -= wrote;
-
-            if remaining == 0 {
-                break;
-            }
-        }
-
-        Ok(bytes_read as usize)
+        read_vectored_handler(self, bufs, Some(offset))
     }
 
     fn write_vectored_at(&self, bufs: &[io::IoSlice<'_>], offset: u64) -> io::Result<usize> {
