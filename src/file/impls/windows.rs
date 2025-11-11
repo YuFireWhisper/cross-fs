@@ -1,8 +1,13 @@
-use std::io;
-use std::io::{Read, Write};
 #[cfg(feature = "direct-io")]
-use std::os::windows::prelude::AsRawHandle;
 use std::os::windows::{self, fs::FileExt as _};
+use std::{
+    io::{self, Read, Write},
+    os::windows::{
+        io::{BorrowedHandle, IntoRawHandle, OwnedHandle},
+        prelude::{AsHandle, AsRawHandle},
+        raw,
+    },
+};
 
 #[cfg(feature = "direct-io")]
 use windows_sys::Win32::{
@@ -164,6 +169,30 @@ fn write_vectored_handler(
     }
 
     Ok(bytes_written as usize)
+}
+
+impl AsHandle for File {
+    fn as_handle(&self) -> BorrowedHandle<'_> {
+        self.inner.as_handle()
+    }
+}
+
+impl AsRawHandle for File {
+    fn as_raw_handle(&self) -> raw::HANDLE {
+        self.inner.as_raw_handle()
+    }
+}
+
+impl From<File> for OwnedHandle {
+    fn from(file: File) -> Self {
+        file.inner.into()
+    }
+}
+
+impl IntoRawHandle for File {
+    fn into_raw_handle(self) -> raw::HANDLE {
+        self.inner.into_raw_handle()
+    }
 }
 
 impl Read for &File {
