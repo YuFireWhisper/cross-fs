@@ -2,7 +2,7 @@
 name = "cross-fs"
 version = "0.1.0"
 edition = "2024"
-description = "A cross-platform filesystem"
+description = "A cross-platform std::fs::File extension"
 
 [features]
 align-512 = []
