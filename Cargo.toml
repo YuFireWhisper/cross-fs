@@ -2,6 +2,7 @@
 name = "cross-fs"
 version = "0.1.0"
 edition = "2024"
+description = "A cross-platform filesystem"
 
 [features]
 align-512 = []
