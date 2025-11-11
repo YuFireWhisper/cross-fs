@@ -1,8 +1,10 @@
-#[cfg(feature = "direct-io")]
 use std::os::{fd::RawFd, unix::io::AsRawFd};
 use std::{
     io::{self, Read, Write},
-    os::unix::{self, fs::FileExt as _},
+    os::{
+        fd::{AsFd, IntoRawFd, OwnedFd},
+        unix::{self, fs::FileExt as _},
+    },
 };
 
 #[cfg(feature = "direct-io")]
@@ -122,6 +124,30 @@ impl File {
             n if n < 0 => Err(io::Error::last_os_error()),
             n => Ok(n as usize),
         }
+    }
+}
+
+impl AsFd for File {
+    fn as_fd(&self) -> unix::io::BorrowedFd<'_> {
+        self.inner.as_fd()
+    }
+}
+
+impl AsRawFd for File {
+    fn as_raw_fd(&self) -> RawFd {
+        self.inner.as_raw_fd()
+    }
+}
+
+impl From<File> for OwnedFd {
+    fn from(file: File) -> Self {
+        file.inner.into()
+    }
+}
+
+impl IntoRawFd for File {
+    fn into_raw_fd(self) -> RawFd {
+        self.inner.into_raw_fd()
     }
 }
 
