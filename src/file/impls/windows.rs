@@ -1,8 +1,8 @@
 use std::io;
 use std::io::{Read, Write};
-use std::os::windows;
 #[cfg(feature = "direct-io")]
 use std::os::windows::prelude::AsRawHandle;
+use std::os::windows::{self, fs::FileExt as _};
 
 #[cfg(feature = "direct-io")]
 use windows_sys::Win32::{
@@ -11,13 +11,17 @@ use windows_sys::Win32::{
     System::IO::{GetOverlappedResult, OVERLAPPED},
 };
 
-use crate::{File, file::PositionedExt};
+use crate::{
+    File,
+    file::PositionedExt,
+    file::impls::{read_helper, write_helper},
+};
 #[cfg(feature = "direct-io")]
 use crate::{
     avec,
     file::{
         VectoredExt,
-        impls::{ALIGN, LENGTH_NON_ALIGNED_ERROR, read_helper, write_helper},
+        impls::{ALIGN, LENGTH_NON_ALIGNED_ERROR},
     },
 };
 
@@ -173,14 +177,8 @@ fn write_vectored_handler(
 }
 
 impl Read for &File {
-    #[cfg(feature = "direct-io")]
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        read_helper(self, buf, (), |mut f, b, _| f.read(&mut b[..]))
-    }
-
-    #[cfg(not(feature = "direct-io"))]
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        (&self.inner).read(buf)
+        read_helper(self, buf, (), |mut f, b, _| f.read(b))
     }
 
     #[cfg(feature = "direct-io")]
@@ -220,14 +218,8 @@ impl Read for File {
 }
 
 impl Write for &File {
-    #[cfg(feature = "direct-io")]
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         write_helper(self, buf, (), |mut f, b, _| f.write(b))
-    }
-
-    #[cfg(not(feature = "direct-io"))]
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        (&self.inner).write(buf)
     }
 
     #[cfg(feature = "direct-io")]
@@ -271,28 +263,12 @@ impl Write for File {
 }
 
 impl PositionedExt for File {
-    #[cfg(feature = "direct-io")]
     fn read_at(&self, buf: &mut [u8], offset: u64) -> io::Result<usize> {
-        read_helper(self, buf, offset, |f, b, o| {
-            windows::fs::FileExt::seek_read(f, b, o)
-        })
+        read_helper(self, buf, offset, |f, b, o| f.seek_read(b, o))
     }
 
-    #[cfg(not(feature = "direct-io"))]
-    fn read_at(&self, buf: &mut [u8], offset: u64) -> io::Result<usize> {
-        windows::fs::FileExt::seek_read(&self.inner, buf, offset)
-    }
-
-    #[cfg(feature = "direct-io")]
     fn write_at(&self, buf: &[u8], offset: u64) -> io::Result<usize> {
-        write_helper(self, buf, offset, |f, b, o| {
-            windows::fs::FileExt::seek_write(f, b, o)
-        })
-    }
-
-    #[cfg(not(feature = "direct-io"))]
-    fn write_at(&self, buf: &[u8], offset: u64) -> io::Result<usize> {
-        windows::fs::FileExt::seek_write(&self.inner, buf, offset)
+        write_helper(self, buf, offset, |f, b, o| f.seek_write(b, o))
     }
 }
 
