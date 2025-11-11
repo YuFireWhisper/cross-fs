@@ -193,8 +193,15 @@ impl Read for &File {
         (&self.inner).read_vectored(bufs)
     }
 
+    #[cfg(feature = "direct-io")]
+    #[inline]
     fn is_read_vectored(&self) -> bool {
         true
+    }
+
+    #[cfg(not(feature = "direct-io"))]
+    fn is_read_vectored(&self) -> bool {
+        (&self.inner).is_read_vectored()
     }
 }
 
@@ -231,6 +238,17 @@ impl Write for &File {
     #[cfg(not(feature = "direct-io"))]
     fn write_vectored(&mut self, bufs: &[std::io::IoSlice<'_>]) -> io::Result<usize> {
         (&self.inner).write_vectored(bufs)
+    }
+
+    #[cfg(feature = "direct-io")]
+    #[inline]
+    fn is_write_vectored(&self) -> bool {
+        true
+    }
+
+    #[cfg(not(feature = "direct-io"))]
+    fn is_write_vectored(&self) -> bool {
+        (&self.inner).is_write_vectored()
     }
 
     fn flush(&mut self) -> io::Result<()> {
