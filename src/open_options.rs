@@ -48,6 +48,7 @@ impl OpenOptions {
         self
     }
 
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
     pub fn direct_io(&mut self, enable: bool) -> &mut Self {
         self.direct_io = enable;
         self
