@@ -15,6 +15,25 @@ use crate::{
     file::{PositionedExt, VectoredExt},
 };
 
+fn tmp_bufs_into_bufs(n: usize, bufs: &mut [io::IoSliceMut<'_>], tmp_bufs: Vec<Option<Vec<u8>>>) {
+    let mut remaining = n;
+
+    for (buf, tmp_buf) in bufs.iter_mut().zip(tmp_bufs) {
+        let len = buf.len();
+        let read = remaining.min(len);
+
+        if let Some(tmp_buf) = tmp_buf {
+            buf.copy_from_slice(&tmp_buf[..read]);
+        }
+
+        remaining -= read;
+
+        if remaining == 0 {
+            break;
+        }
+    }
+}
+
 impl Read for &File {
     #[cfg(feature = "direct-io")]
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
@@ -61,32 +80,15 @@ impl Read for &File {
             )
         };
 
-        if n < 0 {
-            return Err(io::Error::last_os_error());
-        }
-
-        if n == 0 {
-            return Ok(0);
-        }
-
-        let mut remaining = n as usize;
-
-        for (buf, tmp_buf) in bufs.iter_mut().zip(tmp_bufs) {
-            let len = buf.len();
-            let wrote = remaining.min(len);
-
-            if let Some(tmp_buf) = tmp_buf {
-                buf.copy_from_slice(&tmp_buf[..wrote]);
-            }
-
-            remaining -= wrote;
-
-            if remaining == 0 {
-                break;
+        match n {
+            n if n < 0 => Err(io::Error::last_os_error()),
+            0 => Ok(0),
+            n => {
+                let n = n as usize;
+                tmp_bufs_into_bufs(n, bufs, tmp_bufs);
+                Ok(n)
             }
         }
-
-        Ok(n as usize)
     }
 
     #[cfg(not(feature = "direct-io"))]
@@ -271,32 +273,15 @@ impl VectoredExt for File {
             )
         };
 
-        if n < 0 {
-            return Err(io::Error::last_os_error());
-        }
-
-        if n == 0 {
-            return Ok(0);
-        }
-
-        let mut remaining = n as usize;
-
-        for (buf, tmp_buf) in bufs.iter_mut().zip(tmp_bufs) {
-            let len = buf.len();
-            let read = remaining.min(len);
-
-            if let Some(tmp_buf) = tmp_buf {
-                buf.copy_from_slice(&tmp_buf[..read]);
-            }
-
-            remaining -= read;
-
-            if remaining == 0 {
-                break;
+        match n {
+            n if n < 0 => Err(io::Error::last_os_error()),
+            0 => Ok(0),
+            n => {
+                let n = n as usize;
+                tmp_bufs_into_bufs(n, bufs, tmp_bufs);
+                Ok(n)
             }
         }
-
-        Ok(n as usize)
     }
 
     #[cfg(not(feature = "direct-io"))]
