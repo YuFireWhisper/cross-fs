@@ -1,4 +1,3 @@
-#[cfg(feature = "direct-io")]
 use std::io;
 
 #[cfg(feature = "direct-io")]
